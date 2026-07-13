@@ -18,10 +18,11 @@ direto.
 1. Salve `secretario.mjs` no seu ambiente (ex.: `/data/bin/`).
 2. Ambiente do processo: APENAS `SUPABASE_URL` e
    `SUPABASE_SERVICE_ROLE_KEY`.
-3. Verifique: `node secretario.mjs` sem argumentos lista 7 comandos
-   (`fetch-pending`, `create-task`, `ack-card`, `mark-processed`,
-   `list-open`, `close-task`, `log-run`). Faltou comando = sua cópia está
-   velha; avise o humano, não invente comando.
+3. Verifique: `node secretario.mjs` sem argumentos lista 9 comandos
+   (`fetch-pending`, `fetch-meetings`, `create-task`, `ack-card`,
+   `mark-processed`, `mark-meeting-processed`, `list-open`, `close-task`,
+   `log-run`). Faltou comando = sua cópia está velha; avise o humano, não
+   invente comando.
 4. Adote este documento como instrução permanente.
 5. Crie **UM único cron, a cada hora** (sugestão: 7h às 23h no fuso do
    humano). Proibido: cron por task, crons duplicados.
@@ -81,15 +82,30 @@ direto.
    Exceção: se um `create-task` falhar, NÃO marque as mensagens dele; elas
    voltam na próxima varredura (melhor reprocessar que perder).
 
-6. Feche a varredura com auditoria:
+6. **Reuniões (só se o Fireflies foi instalado na fase 3B)**: rode
+   `node secretario.mjs fetch-meetings`. Para cada reunião retornada:
+   - `action_items_raw` vem em blocos por pessoa (`**Nome**` seguido das
+     tarefas). O `(mm:ss)` no fim de cada linha é o timestamp da call,
+     NUNCA um prazo: não o use como prazo_previsto.
+   - Julgue cada item com os critérios da seção "Reuniões" abaixo. Task
+     de reunião usa `"meeting_id": "<id da reuniao>"` no create-task (em
+     vez de `message_ids`) e `"responsavel"` com o dono do item.
+   - Publique os cards normalmente (passo 4).
+   - Quando TODOS os itens da reunião estiverem decididos (task criada ou
+     descartado), rode `mark-meeting-processed <id>`. Se um create-task
+     falhar, NÃO marque: a reunião volta inteira na próxima varredura (os
+     create-task já feitos são idempotentes, não duplicam).
+
+7. Feche a varredura com auditoria:
 
    ```bash
    node secretario.mjs log-run '{"mensagens_lidas": N,
-     "conversas_analisadas": N, "tasks_criadas": N,
-     "ruido_arquivado": N, "cobrancas_sla": N, "notas": "..."}'
+     "conversas_analisadas": N, "reunioes_analisadas": N,
+     "tasks_criadas": N, "ruido_arquivado": N,
+     "cobrancas_sla": N, "notas": "..."}'
    ```
 
-7. **Relatório**: se criou 1+ task, mande UM resumo curto ao humano
+8. **Relatório**: se criou 1+ task, mande UM resumo curto ao humano
    (ex.: "Varredura 14h: 3 tasks novas, 2 empresa e 1 pessoal; 5
    conversas de ruído arquivadas"). Se não criou nada, silêncio: não
    diga "tudo em dia" toda hora.
@@ -138,6 +154,16 @@ Regras, em ordem de precedência:
 7. **1 task por demanda**, não por mensagem. Duas demandas distintas na
    mesma conversa = duas tasks; divida os `message_ids` pelo assunto a que
    pertencem (mensagem que sustenta as duas vai na mais importante).
+
+**Reuniões (action items do Fireflies):**
+- Item do DONO, ou sem dono nomeado: candidato a task (aplique as regras
+  acima normalmente).
+- Item de TERCEIRO nomeado: NÃO vira task; só vira (como `acompanhar`) se
+  o dono depende dele pra algo com prazo ou precisa cobrar.
+- Genérico sem entregável ("considerar", "estudar", "manter alinhamento"):
+  fora.
+- Categoria de item de reunião: quase sempre `empresa` (reunião de
+  trabalho); `pessoal` só se a pauta for claramente pessoal.
 
 **Categoria** (decide o tópico do card):
 - `empresa`: clientes, fornecedores, sócios, trabalho, dinheiro de

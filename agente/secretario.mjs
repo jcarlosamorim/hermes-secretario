@@ -6,10 +6,12 @@
 // create-task devolve o card pronto em texto).
 //
 // Comandos:
-//   fetch-pending                     conversas pendentes de triagem (JSON)
-//   create-task '<json>'              cria task, marca msgs processadas, devolve card pronto
+//   fetch-pending                     conversas de WhatsApp pendentes de triagem (JSON)
+//   fetch-meetings                    reuniões (Fireflies) com action items pendentes
+//   create-task '<json>'              cria task (origem: message_ids OU meeting_id), devolve card
 //   ack-card <task_uuid> <card_ref>   registra onde o card foi publicado
 //   mark-processed <uuid> [...]       arquiva mensagens de ruído (sem task)
+//   mark-meeting-processed <uuid> [...]  marca reuniões como triadas
 //   list-open [--vencidas]            tasks abertas (opcional: só SLA vencido)
 //   close-task <uuid> [motivo]        conclui task
 //   log-run '<json>'                  grava auditoria da varredura em triagem_runs
@@ -103,8 +105,11 @@ export function validateTaskInput(input) {
   if (!PRIORIDADES.has(input.prioridade)) erros.push(`prioridade invalida: ${input.prioridade} (use critica|alta|media|baixa)`);
   if (!CONFIANCAS.has(input.confianca)) erros.push(`confianca invalida: ${input.confianca} (use alta|media|baixa)`);
   if (input.tipo !== undefined && !TIPOS.has(input.tipo)) erros.push(`tipo invalido: ${input.tipo}`);
-  if (!Array.isArray(input.message_ids) || input.message_ids.length === 0) {
-    erros.push('message_ids obrigatorio (array de uuids das mensagens da conversa)');
+  // Exatamente UMA origem: mensagens de WhatsApp OU reunião do Fireflies.
+  const temMsgs = Array.isArray(input.message_ids) && input.message_ids.length > 0;
+  const temMeeting = typeof input.meeting_id === 'string' && input.meeting_id.length > 0;
+  if (temMsgs === temMeeting) {
+    erros.push('origem: informe message_ids (WhatsApp) OU meeting_id (reuniao), exatamente um');
   }
   if (input.prazo_previsto !== undefined && input.prazo_previsto !== null) {
     if (typeof input.prazo_previsto !== 'string' || !ISO_COM_OFFSET.test(input.prazo_previsto) ||
@@ -195,24 +200,39 @@ async function cmdCreateTask(jsonArg) {
   const [valido, erros] = validateTaskInput(input);
   if (!valido) return fail(`input invalido: ${erros.join('; ')}`);
 
-  // Confere que as mensagens existem e elege a mais recente como âncora.
-  const msgs = await pg(
-    `whatsapp_messages?id=${inList(input.message_ids)}` +
-    '&select=id,received_at,chat_name,chat_type,sender_name'
-  );
-  if (msgs.length !== input.message_ids.length) {
-    return fail(`message_ids: esperava ${input.message_ids.length} mensagens, achei ${msgs.length}`);
+  let origem;
+  let origemRow;
+  let conflictTarget;
+  if (input.meeting_id) {
+    const meetings = await pg(
+      `fireflies_meetings?id=eq.${input.meeting_id}&select=id,title,meeting_date`
+    );
+    if (!meetings.length) return fail(`reuniao ${input.meeting_id} nao encontrada`);
+    origem = `${meetings[0].title || 'reuniao'} (reuniao)`;
+    origemRow = { fireflies_meeting_id: input.meeting_id, context_message_ids: [] };
+    // Uma reunião gera N tasks: a chave de idempotência é (reunião, título).
+    conflictTarget = 'fireflies_meeting_id,titulo';
+  } else {
+    // Confere que as mensagens existem e elege a mais recente como âncora.
+    const msgs = await pg(
+      `whatsapp_messages?id=${inList(input.message_ids)}` +
+      '&select=id,received_at,chat_name,chat_type,sender_name'
+    );
+    if (msgs.length !== input.message_ids.length) {
+      return fail(`message_ids: esperava ${input.message_ids.length} mensagens, achei ${msgs.length}`);
+    }
+    msgs.sort((a, b) => Date.parse(a.received_at) - Date.parse(b.received_at));
+    const anchor = msgs[msgs.length - 1];
+    const origemNome = anchor.chat_name || anchor.sender_name || 'desconhecido';
+    origem = `${origemNome} (${anchor.chat_type === 'group' ? 'grupo' : 'DM'})`;
+    origemRow = { whatsapp_message_id: anchor.id, context_message_ids: input.message_ids };
+    conflictTarget = 'whatsapp_message_id';
   }
-  msgs.sort((a, b) => Date.parse(a.received_at) - Date.parse(b.received_at));
-  const anchor = msgs[msgs.length - 1];
-  const origemNome = anchor.chat_name || anchor.sender_name || 'desconhecido';
-  const origem = `${origemNome} (${anchor.chat_type === 'group' ? 'grupo' : 'DM'})`;
 
   const { sla_at, sla_regra } = computeSla(input.prioridade, input.prazo_previsto ?? null);
 
   const row = {
-    whatsapp_message_id: anchor.id,
-    context_message_ids: input.message_ids,
+    ...origemRow,
     titulo: input.titulo,
     resumo: input.resumo,
     categoria: input.categoria,
@@ -229,7 +249,7 @@ async function cmdCreateTask(jsonArg) {
   };
 
   // Upsert com ignore-duplicates: retry após falha parcial não duplica task.
-  const inserted = await pg('tasks?on_conflict=whatsapp_message_id', {
+  const inserted = await pg(`tasks?on_conflict=${conflictTarget}`, {
     method: 'POST',
     body: row,
     headers: { prefer: 'return=representation,resolution=ignore-duplicates' },
@@ -238,16 +258,23 @@ async function cmdCreateTask(jsonArg) {
   let task = inserted?.[0];
   if (!task) {
     jaExistia = true;
-    const existing = await pg(`tasks?whatsapp_message_id=eq.${anchor.id}&select=*`);
+    const lookup = input.meeting_id
+      ? `tasks?fireflies_meeting_id=eq.${input.meeting_id}&titulo=eq.${encodeURIComponent(input.titulo)}&select=*`
+      : `tasks?whatsapp_message_id=eq.${row.whatsapp_message_id}&select=*`;
+    const existing = await pg(lookup);
     task = existing[0];
     if (!task) return fail('conflito no insert mas task existente nao encontrada');
   }
 
-  // Marca TODAS as mensagens da conversa como processadas (descarte do acúmulo).
-  await pg(`whatsapp_messages?id=${inList(input.message_ids)}`, {
-    method: 'PATCH',
-    body: { processed: true },
-  });
+  // Origem WhatsApp: marca TODAS as mensagens da conversa como processadas
+  // (descarte do acúmulo). Origem reunião: NÃO marca nada aqui — uma reunião
+  // gera N tasks; o Hermes fecha com mark-meeting-processed no fim.
+  if (!input.meeting_id) {
+    await pg(`whatsapp_messages?id=${inList(input.message_ids)}`, {
+      method: 'PATCH',
+      body: { processed: true },
+    });
+  }
 
   print({
     ok: true,
@@ -274,6 +301,28 @@ async function cmdAckCard(taskId, cardRef) {
 async function cmdMarkProcessed(ids) {
   if (!ids.length) return fail('uso: mark-processed <uuid> [uuid...]');
   await pg(`whatsapp_messages?id=${inList(ids)}`, {
+    method: 'PATCH',
+    body: { processed: true },
+  });
+  print({ ok: true, marcadas: ids.length });
+}
+
+async function cmdFetchMeetings() {
+  const rows = await pg(
+    'fireflies_meetings?processed=eq.false&fetch_status=eq.ok' +
+    '&select=id,title,meeting_date,action_items_raw&order=received_at.asc&limit=20'
+  );
+  print({
+    ok: true,
+    total: rows.length,
+    aviso: 'action_items_raw vem em blocos por pessoa; o (mm:ss) no fim de cada linha e timestamp da call, NUNCA prazo',
+    reunioes: rows,
+  });
+}
+
+async function cmdMarkMeetingProcessed(ids) {
+  if (!ids.length) return fail('uso: mark-meeting-processed <uuid> [uuid...]');
+  await pg(`fireflies_meetings?id=${inList(ids)}`, {
     method: 'PATCH',
     body: { processed: true },
   });
@@ -310,6 +359,7 @@ async function cmdLogRun(jsonArg) {
   const row = {
     mensagens_lidas: int(input.mensagens_lidas),
     conversas_analisadas: int(input.conversas_analisadas),
+    reunioes_analisadas: int(input.reunioes_analisadas),
     tasks_criadas: int(input.tasks_criadas),
     ruido_arquivado: int(input.ruido_arquivado),
     cobrancas_sla: int(input.cobrancas_sla),
@@ -345,20 +395,23 @@ function fail(msg) {
   process.exit(1);
 }
 
-const USO = `hermes-secretario CLI (v2)
+const USO = `hermes-secretario CLI (v3)
 
-  fetch-pending                    conversas pendentes de triagem
-  create-task '<json>'             cria task, marca processadas, devolve card pronto
+  fetch-pending                    conversas de WhatsApp pendentes de triagem
+  fetch-meetings                   reunioes (Fireflies) pendentes de triagem
+  create-task '<json>'             cria task, devolve card pronto
   ack-card <task_uuid> <card_ref>  registra onde o card foi publicado
-  mark-processed <uuid> [...]      arquiva ruido sem criar task
+  mark-processed <uuid> [...]      arquiva ruido de WhatsApp sem criar task
+  mark-meeting-processed <uuid> [...]  marca reunioes como triadas
   list-open [--vencidas]           tasks abertas
   close-task <uuid> [motivo]       conclui task
   log-run '<json>'                 grava auditoria da varredura
 
 create-task espera: { titulo, resumo, categoria: pessoal|empresa,
   prioridade: critica|alta|media|baixa, confianca: alta|media|baixa,
-  message_ids: [uuid...], tipo?, requer_resposta?, acao_sugerida?,
-  prazo_texto?, prazo_previsto? (ISO com offset), responsavel? }
+  message_ids: [uuid...] OU meeting_id: uuid (exatamente um),
+  tipo?, requer_resposta?, acao_sugerida?, prazo_texto?,
+  prazo_previsto? (ISO com offset), responsavel? }
 
 env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (nada alem disso)`;
 
@@ -366,9 +419,11 @@ async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   switch (cmd) {
     case 'fetch-pending': return cmdFetchPending();
+    case 'fetch-meetings': return cmdFetchMeetings();
     case 'create-task': return cmdCreateTask(args[0]);
     case 'ack-card': return cmdAckCard(args[0], args.slice(1).join(' '));
     case 'mark-processed': return cmdMarkProcessed(args);
+    case 'mark-meeting-processed': return cmdMarkMeetingProcessed(args);
     case 'list-open': return cmdListOpen(args);
     case 'close-task': return cmdCloseTask(args[0], args.slice(1).join(' '));
     case 'log-run': return cmdLogRun(args[0]);

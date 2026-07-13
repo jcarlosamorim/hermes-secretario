@@ -21,10 +21,11 @@ const MIGRATIONS = [
   '001_whatsapp_messages.sql',
   '002_tasks.sql',
   '003_triagem_runs.sql',
+  '004_fireflies.sql',
 ];
 const RAW_BASE =
   'https://raw.githubusercontent.com/jcarlosamorim/hermes-secretario/main/migrations/';
-const TABELAS = ['whatsapp_messages', 'tasks', 'triagem_runs'];
+const TABELAS = ['whatsapp_messages', 'tasks', 'triagem_runs', 'fireflies_meetings'];
 
 export function extractProjectRef(url) {
   const m = String(url || '').match(/^https:\/\/([a-z0-9]+)\.supabase\.co\/?$/);

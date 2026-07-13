@@ -69,6 +69,19 @@ ok('confianca fora da allowlist reprova', () => {
 ok('message_ids vazio reprova', () => {
   assert.equal(validateTaskInput({ ...BASE, message_ids: [] })[0], false);
 });
+ok('meeting_id sozinho passa (task de reuniao)', () => {
+  const { message_ids, ...semMsgs } = BASE;
+  assert.deepEqual(validateTaskInput({ ...semMsgs, meeting_id: 'deadbeef-0000-0000-0000-000000000002' }), [true, []]);
+});
+ok('message_ids + meeting_id juntos reprova (origem ambigua)', () => {
+  const [valido, erros] = validateTaskInput({ ...BASE, meeting_id: 'deadbeef-0000-0000-0000-000000000002' });
+  assert.equal(valido, false);
+  assert.match(erros.join(';'), /origem/);
+});
+ok('nenhuma origem reprova', () => {
+  const { message_ids, ...semMsgs } = BASE;
+  assert.equal(validateTaskInput(semMsgs)[0], false);
+});
 ok('prazo_previsto SEM offset reprova (fuso da maquina nao pode decidir)', () => {
   const [valido, erros] = validateTaskInput({ ...BASE, prazo_previsto: '2026-07-14T09:00:00' });
   assert.equal(valido, false);

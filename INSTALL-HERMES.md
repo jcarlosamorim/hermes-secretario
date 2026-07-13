@@ -32,8 +32,9 @@ depender da própria memória pra não perder pedido, prazo e cobrança.
 | Arquivo | Pra quê |
 |---|---|
 | `agente/instalar-banco.mjs` | VOCÊ roda na fase 1: cria as tabelas sozinho |
-| `migrations/001..003*.sql` | o SQL que o instalar-banco executa (não peça pro humano colar) |
+| `migrations/001..004*.sql` | o SQL que o instalar-banco executa (não peça pro humano colar) |
 | `webhook/` | projeto que o humano importa na Vercel (fase 2) |
+| `fireflies-webhook/` | segundo projeto Vercel, só na fase 3B (opcional) |
 | `agente/secretario.mjs` | sua ferramenta de operação (fase 4: instale em você) |
 | `agente/AGENTE-TRIAGEM.md` | sua rotina permanente de triagem (fase 4) |
 
@@ -52,6 +53,9 @@ Confirme com o humano, antes de começar:
 - [ ] O grupo do Telegram entre vocês existe e tem os tópicos
       **Tarefas Pessoais** e **Tarefas Empresa** (crie-os se faltar; é
       onde você vai publicar os cards).
+- [ ] Pergunte: ele usa **Fireflies** pra gravar/transcrever reuniões?
+      Se sim, a fase 3B (opcional) liga as reuniões como segunda fonte.
+      Se não, pule a 3B sem culpa: dá pra ligar depois.
 - [ ] Você consegue rodar `node --version` (18+) no seu ambiente. Se não
       conseguir, avise que vai operar em modo "comandos prontos pra ele".
 
@@ -243,6 +247,80 @@ A mensagem de teste deve aparecer com `processed: false`.
 
 ---
 
+## FASE 3B — Fireflies (OPCIONAL: reuniões como segunda fonte)
+
+Só execute se o humano usa Fireflies (checklist da fase 0). O fluxo:
+o Fireflies avisa quando uma reunião é transcrita → webhook grava no mesmo
+banco → um cron horário busca os action items via API (sem LLM) → você
+tria na sua varredura normal (`fetch-meetings`), como faz com o WhatsApp.
+
+### 3B.1 Credenciais (ele cola, você guarda)
+
+> No app do Fireflies (app.fireflies.ai): **Settings > Developer
+> settings**, copie a **API key** e me mande.
+
+Guarde como `FIREFLIES_API_KEY`. Gere você mesmo mais dois segredos:
+- `FIREFLIES_WEBHOOK_SECRET`: **precisa ter entre 16 e 32 caracteres**
+  (limite do próprio Fireflies): `openssl rand -hex 12` gera 24, serve.
+- `CRON_SECRET`: `openssl rand -hex 16` (protege o cron de disparo alheio).
+
+### 3B.2 Segundo projeto na Vercel (ele executa no browser, você dita)
+
+> Na Vercel: **Add New > Project**, importe o MESMO repositório de antes.
+> **Root Directory**: desta vez selecione a pasta **`fireflies-webhook`**.
+> Em Environment Variables, adicione as 5 que eu vou te passar, e Deploy.
+
+Passe: `FIREFLIES_WEBHOOK_SECRET`, `FIREFLIES_API_KEY`, `CRON_SECRET`,
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. Peça a URL de produção.
+
+Valide: `curl -s https://<projeto-ff>.vercel.app/api/webhook` deve
+responder `hermes-secretario-fireflies ok`.
+
+### 3B.3 Registrar o webhook no Fireflies (ele executa; não existe API)
+
+> No Fireflies: **Settings > Developer settings**, seção **Webhooks**.
+> Cole a URL `https://<projeto-ff>.vercel.app/api/webhook` e, no campo de
+> secret, cole o segredo que eu vou te passar (o
+> FIREFLIES_WEBHOOK_SECRET). Salve.
+
+### 3B.4 Validação da fase
+
+Peça pra ele fazer uma call curta de teste com o bot do Fireflies (ou
+espere a próxima reunião real). Quando a transcrição concluir:
+
+1. Confira a captura (você executa):
+
+```bash
+curl -s "$SUPABASE_URL/rest/v1/fireflies_meetings?select=title,fetch_status,processed&order=received_at.desc&limit=3" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"
+```
+
+2. A linha nasce com `fetch_status: "pendente"`. O cron horário busca os
+   action items; pra não esperar, dispare-o você:
+
+```bash
+curl -s -H "Authorization: Bearer $CRON_SECRET" \
+  https://<projeto-ff>.vercel.app/api/cron/fetch-actions
+```
+
+3. Re-rode o curl do passo 1: `fetch_status` deve virar `"ok"` (ou seguir
+   `"pendente"` por alguns minutos se o summary ainda estiver sendo
+   gerado; o cron re-tenta a cada hora).
+
+| Sintoma | Causa provável |
+|---|---|
+| Nada chega no banco | webhook não registrado, ou secret com tamanho fora de 16-32 chars (o Fireflies rejeita silenciosamente) |
+| `401` no cron manual | `CRON_SECRET` divergente entre env e comando |
+| `fetch_status: "erro"` | API key errada, ou rate limit (plano Free = 50 chamadas/dia; o cron gasta no máximo 2/hora) |
+
+Nota pra quem instalou o banco ANTES desta fase existir no repo: a
+migration 004 é aplicada pelo `instalar-banco.mjs`. Se o seu banco foi
+criado sem ela, peça um novo Personal Access Token temporário, re-rode o
+instalar-banco (idempotente) e mande revogar o token de novo.
+
+---
+
 ## FASE 4 — Instalar a rotina de triagem em você mesmo
 
 Agora o pipeline captura sozinho; falta você virar o triador.
@@ -251,9 +329,10 @@ Agora o pipeline captura sozinho; falta você virar o triador.
    `/data/bin/secretario.mjs`).
 2. Configure no ambiente do processo APENAS: `SUPABASE_URL` e
    `SUPABASE_SERVICE_ROLE_KEY`.
-3. Verifique: `node secretario.mjs` sem argumentos deve listar 7 comandos
-   (`fetch-pending`, `create-task`, `ack-card`, `mark-processed`,
-   `list-open`, `close-task`, `log-run`).
+3. Verifique: `node secretario.mjs` sem argumentos deve listar 9 comandos
+   (`fetch-pending`, `fetch-meetings`, `create-task`, `ack-card`,
+   `mark-processed`, `mark-meeting-processed`, `list-open`, `close-task`,
+   `log-run`).
 4. Leia `agente/AGENTE-TRIAGEM.md` INTEIRO e adote como sua rotina
    permanente (instrução/memória de longo prazo). Ele define seu ciclo
    horário, seus critérios de julgamento e onde publicar cada card.

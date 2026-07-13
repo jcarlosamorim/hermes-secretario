@@ -1,0 +1,11 @@
+{
+  "name": "hermes-secretario-fireflies",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hermes Secretário: fonte 2 (reuniões). Webhook Fireflies -> Supabase + cron que materializa action items via GraphQL (sem LLM: a triagem é do Hermes).",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@vercel/functions": "^1.5.0"
+  }
+}

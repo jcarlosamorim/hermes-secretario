@@ -8,14 +8,16 @@ o que vencer o prazo. Você para de depender da memória pra não perder
 pedido, prazo e cobrança.
 
 ```
-WhatsApp (uazapi) ──▶ webhook (Vercel) ──▶ whatsapp_messages (Supabase)
-                       sem LLM, só filtro           │
-                                                    ▼
+WhatsApp (uazapi) ──▶ webhook (Vercel) ──▶ whatsapp_messages ─┐
+                       sem LLM, só filtro                     │ (Supabase)
+Fireflies (opcional) ─▶ webhook (Vercel) ─▶ fireflies_meetings┘
+                        cron busca action items      │
+                                                     ▼
                                   SEU HERMES (varre de hora em hora)
-                                  julga conversas via secretario.mjs,
-                                  grava tasks e publica os cards
-                                                    │
-                                                    ▼
+                                  julga conversas e reuniões via
+                                  secretario.mjs e publica os cards
+                                                     │
+                                                     ▼
                           Grupo de vocês no Telegram
                           ├── 🏠 Tarefas Pessoais
                           ├── 🏢 Tarefas Empresa
@@ -32,15 +34,18 @@ Hermes** e diga:
 
 Ele conduz a instalação em 4 fases, validando cada uma: (1) você cria o
 projeto no Supabase e cola as credenciais, e ELE cria as tabelas sozinho,
-(2) subir o webhook na Vercel, (3) conectar seu WhatsApp na uazapi, (4)
+(2) subir o webhook na Vercel, (3) conectar seu WhatsApp na uazapi,
+(3B, opcional) ligar o Fireflies pra reuniões virarem tasks também, (4)
 instalar a rotina de triagem nele mesmo. Você nunca toca em SQL nem em
 terminal: só cria contas e cola credenciais quando ele pedir.
 
 ## O que você vai precisar ter (ou criar durante a instalação)
 
 - Conta **Supabase** (free) — o banco.
-- Conta **Vercel** (free) — o webhook de captura.
+- Conta **Vercel** (free) — os webhooks de captura.
 - Conta **uazapi** (paga) — a ponte com o WhatsApp.
+- Conta **Fireflies** (opcional) — se quiser que action items de reuniões
+  também virem tasks.
 - O grupo do Telegram que você já usa com seu Hermes (com os tópicos
   Tarefas Pessoais e Tarefas Empresa; ele cria se faltar).
 
@@ -48,9 +53,10 @@ terminal: só cria contas e cola credenciais quando ele pedir.
 
 ```
 INSTALL-HERMES.md         runbook de instalação (escrito PRO seu Hermes)
-migrations/               3 SQLs do banco (o Hermes aplica na fase 1)
+migrations/               4 SQLs do banco (o Hermes aplica na fase 1)
 agente/instalar-banco.mjs cria as tabelas via Management API (fase 1)
 webhook/                  captura uazapi -> Supabase (deploy na fase 2)
+fireflies-webhook/        captura Fireflies + cron de action items (fase 3B)
 agente/secretario.mjs     ferramenta que o Hermes usa pra operar (fase 4)
 agente/AGENTE-TRIAGEM.md  rotina permanente de triagem do Hermes (fase 4)
 test/test-secretario.mjs  asserts offline (node test/test-secretario.mjs)
@@ -70,8 +76,8 @@ test/test-secretario.mjs  asserts offline (node test/test-secretario.mjs)
 
 ## O que ficou de fora (extensões possíveis)
 
-Fireflies/reuniões como segunda fonte, transcrição automática de áudio,
-contrato determinístico de resolução ("o dono já respondeu" aqui é
-julgamento do Hermes via `from_me`) e dashboard de infraestrutura. O
-sistema original de referência implementa tudo isso; este repo é o core
-mínimo de ponta a ponta.
+Transcrição automática de áudio do WhatsApp, contrato determinístico de
+resolução ("o dono já respondeu" aqui é julgamento do Hermes via
+`from_me`) e dashboard de infraestrutura. O sistema original de
+referência implementa tudo isso; este repo é o core de ponta a ponta com
+as duas fontes (WhatsApp + reuniões).
