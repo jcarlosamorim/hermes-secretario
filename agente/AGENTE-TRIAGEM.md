@@ -151,8 +151,11 @@ Regras, em ordem de precedência:
 
 1. **Bloqueios duros** (nunca viram task): mensagem ilegível/corrompida;
    áudio/mídia sem transcrição e sem legenda (`[midia sem
-   texto/transcricao]`). Se parecia importante, anote em `notas` do
-   log-run e mencione no relatório; não chute conteúdo.
+   texto/transcricao]`). Com a fase 3D instalada, áudio normalmente chega
+   JÁ transcrito (vira texto comum); o marcador só aparece quando a
+   transcrição falhou ou não está instalada — nesse caso, se parecia
+   importante, anote em `notas` do log-run e mencione no relatório; não
+   chute conteúdo.
 2. **Já resolvido pelo dono**: se as mensagens `from_me: true` (rotuladas
    `DONO`) mostram que ele já respondeu/resolveu a demanda na própria
    conversa, NÃO crie task. A conversa inteira vira `mark-processed`.

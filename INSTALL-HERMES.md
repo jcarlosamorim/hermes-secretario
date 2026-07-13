@@ -37,6 +37,7 @@ depender da própria memória pra não perder pedido, prazo e cobrança.
 | `webhook/` | código da captura WhatsApp + rota Google (o instalar-webhook sobe na fase 2) |
 | `fireflies-webhook/` | código da captura de reuniões, só na fase 3B (opcional) |
 | `google-sync/Code.gs` | Apps Script de Gmail+Agenda, só na fase 3C (opcional) |
+| `webhook/lib/transcribe.js` + `api/cron/transcribe.js` | transcrição de áudio, só na fase 3D (opcional; já viajam no deploy da fase 2) |
 | `agente/secretario.mjs` | sua ferramenta de operação (fase 4: instale em você) |
 | `agente/AGENTE-TRIAGEM.md` | sua rotina permanente de triagem (fase 4) |
 
@@ -61,6 +62,9 @@ Confirme com o humano, antes de começar:
 - [ ] Pergunte: ele quer ligar o **Gmail** (emails que exigem ação viram
       task) e o **Google Agenda** (você checa os compromissos dele nas
       varreduras)? Se sim, fase 3C (opcional). Também dá pra ligar depois.
+- [ ] Pergunte: ele recebe muito **áudio no WhatsApp**? A fase 3D
+      (opcional) transcreve automaticamente via Groq Whisper (conta grátis)
+      — sem ela, áudio sem legenda fica invisível pra triagem.
 - [ ] Você consegue rodar `node --version` (18+) no seu ambiente. Se não
       conseguir, avise que vai operar em modo "comandos prontos pra ele".
 
@@ -214,9 +218,10 @@ curl -s https://<url_producao>/api/webhook/uazapi
 Esperado: `hermes-secretario-webhook ok`. Um POST sem secret deve dar 401
 (isso é o certo: fail-closed).
 
-**Token:** se o humano NÃO vai usar Fireflies (fase 3B), diga a ele pra
-revogar o `VERCEL_TOKEN` agora (Account Settings > Tokens > Revoke) e
-descarte sua cópia. Se vai usar, guarde o token até o fim da 3B.
+**Token:** se NENHUMA fase opcional com deploy (3B Fireflies, 3C Google,
+3D áudio) vai acontecer, diga ao humano pra revogar o `VERCEL_TOKEN`
+agora (Account Settings > Tokens > Revoke) e descarte sua cópia. Senão,
+guarde-o até o último deploy dessas fases.
 
 ---
 
@@ -230,7 +235,8 @@ descarte sua cópia. Se vai usar, guarde o token até o fim da 3B.
 > com o WhatsApp do celular (Configurações > Aparelhos conectados >
 > Conectar aparelho). Me avise quando o status ficar "connected".
 
-Guarde o token como `UAZAPI_INSTANCE_TOKEN` (você só usa nesta fase).
+Guarde o token como `UAZAPI_INSTANCE_TOKEN` (usado nesta fase e, se o
+humano quiser transcrição de áudio, de novo na fase 3D).
 
 ### 3.2 Registrar o webhook (você executa; ou entregue o comando pronto)
 
@@ -425,6 +431,73 @@ curl -s "$SUPABASE_URL/rest/v1/calendar_events?select=title,starts_at&order=star
 | nada chega | `WEBHOOK_URL`/secret errados no Code.gs (o setup loga o erro HTTP: peça o log ao humano) |
 | chegam emails de Promoções/Social | não deveria: a `GMAIL_QUERY` do script os exclui; se vazar, ajuste a query no script |
 | agenda vazia | normal se não há eventos nos próximos 7 dias |
+
+---
+
+## FASE 3D — Transcrição de áudio do WhatsApp (OPCIONAL)
+
+Só execute se o humano quis (checklist da fase 0). Sem ela, áudio sem
+legenda nunca vira task (bloqueio duro da sua rotina). Com ela, o próprio
+webhook transcreve o áudio na chegada (Groq Whisper, `whisper-large-v3`,
+português) e ele entra na triagem como texto normal; uma vassoura diária
+recolhe o que falhar no caminho quente.
+
+### 3D.1 Credenciais
+
+1. Peça ao humano:
+
+> Acesse https://console.groq.com, crie uma conta (grátis) e em
+> **API Keys > Create API Key** gere uma chave. Copie e me mande.
+
+Guarde como `GROQ_API_KEY`. **Nunca aceite chave emprestada de outra
+pessoa/projeto**: a chave é da conta dele.
+
+2. Você já tem da fase 3: `UAZAPI_BASE_URL`
+   (`https://SEUSUBDOMINIO.uazapi.com`) e `UAZAPI_TOKEN` (o token da
+   instância, `UAZAPI_INSTANCE_TOKEN`). Eles passam a viver como env do
+   projeto webhook — é o download da mídia.
+3. Gere `CRON_SECRET` (`openssl rand -hex 16`): protege o disparo manual
+   da vassoura.
+
+### 3D.2 Redeploy do webhook (VOCÊ executa)
+
+Mesmo padrão da 3C.1 (mesmo `VERCEL_TOKEN`; se expirou, peça outro):
+
+```bash
+VERCEL_TOKEN=... GROQ_API_KEY=... UAZAPI_BASE_URL=... UAZAPI_TOKEN=... \
+CRON_SECRET=... UAZAPI_WEBHOOK_SECRET=... OWNER_JID=... \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node instalar-webhook.mjs webhook
+```
+
+(As 4 envs da fase 2, e a `GOOGLE_SYNC_SECRET` se a 3C foi instalada,
+continuam no comando: o script upserta todas e redeploya.) Se este é o
+último deploy, mande revogar o `VERCEL_TOKEN`.
+
+### 3D.3 Validação da fase
+
+1. Peça pra alguém mandar um **áudio de voz** em DM pro número do dono.
+2. Aguarde ~30 s e confira (você executa):
+
+```bash
+curl -s "$SUPABASE_URL/rest/v1/whatsapp_messages?select=text_content,received_at&order=received_at.desc&limit=1" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"
+```
+
+`text_content` deve conter a transcrição. Se vier `null`, dispare a
+vassoura e leia as stats:
+
+```bash
+curl -s -H "Authorization: Bearer $CRON_SECRET" \
+  https://<url_producao>/api/cron/transcribe
+```
+
+| Sintoma | Causa provável |
+|---|---|
+| `skip: transcricao nao instalada` | `GROQ_API_KEY` não chegou no projeto (re-rode o 3D.2) |
+| `falhas` > 0 nas stats | `UAZAPI_TOKEN`/`UAZAPI_BASE_URL` errados (log `transcribe_error` na Vercel) ou chave Groq inválida |
+| `401` no disparo manual | `CRON_SECRET` divergente entre env e comando |
 
 ---
 

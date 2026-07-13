@@ -9,7 +9,8 @@ pedido, prazo e cobrança.
 
 ```
 WhatsApp (uazapi) ──▶ webhook (Vercel) ──▶ whatsapp_messages ──┐
-                       sem LLM, só filtro                      │
+                       filtro sem julgamento;                  │
+                       áudio → texto (Groq, opcional)          │
 Fireflies (opcional) ─▶ webhook (Vercel) ─▶ fireflies_meetings ┤ (Supabase)
                         cron busca action items                │
 Gmail + Agenda ───────▶ Apps Script ──▶ gmail_messages         │
@@ -41,7 +42,8 @@ projeto no Supabase e cola as credenciais, e ELE cria as tabelas sozinho,
 sozinho, (3) conectar seu WhatsApp na uazapi, (3B, opcional) ligar o
 Fireflies pra reuniões virarem tasks também, (3C, opcional) ligar Gmail
 (só email que exige ação vira task) e Google Agenda (checagem dos seus
-compromissos), (4) instalar a rotina de triagem nele mesmo. Você nunca
+compromissos), (3D, opcional) transcrição automática dos áudios do
+WhatsApp, (4) instalar a rotina de triagem nele mesmo. Você nunca
 toca em SQL, terminal ou formulário de deploy: só cria contas e cola
 credenciais quando ele pedir, e revoga os tokens temporários quando ele
 mandar.
@@ -55,6 +57,8 @@ mandar.
   também virem tasks.
 - Conta **Google** (opcional) — se quiser Gmail como fonte de task e a
   Agenda checada nas varreduras (via Apps Script, sem Google Cloud).
+- Conta **Groq** (opcional, grátis) — se quiser os áudios do WhatsApp
+  transcritos automaticamente (Whisper) antes da triagem.
 - O grupo do Telegram que você já usa com seu Hermes (com os tópicos
   Tarefas Pessoais e Tarefas Empresa; ele cria se faltar).
 
@@ -91,8 +95,8 @@ test/test-secretario.mjs  asserts offline (node test/test-secretario.mjs)
 
 ## O que ficou de fora (extensões possíveis)
 
-Transcrição automática de áudio do WhatsApp, contrato determinístico de
-resolução ("o dono já respondeu" aqui é julgamento do Hermes via
-`from_me`) e dashboard de infraestrutura. O sistema original de
-referência implementa tudo isso; este repo é o core de ponta a ponta com
-as duas fontes (WhatsApp + reuniões).
+Contrato determinístico de resolução ("o dono já respondeu" aqui é
+julgamento do Hermes via `from_me`) e dashboard de infraestrutura. O
+sistema original de referência implementa ambos; este repo é o core de
+ponta a ponta com as três fontes (WhatsApp + reuniões + email), agenda e
+transcrição de áudio.

@@ -31,16 +31,19 @@ export const PROJETOS = {
       'vercel.json',
       'api/webhook/uazapi.js',
       'api/webhook/google.js',
+      'api/cron/transcribe.js',
       'lib/extract.js',
       'lib/filter.js',
       'lib/supabase.js',
       'lib/logger.js',
+      'lib/uazapi.js',
+      'lib/transcribe.js',
       'config/excluded-chats.json',
     ],
     envs: ['UAZAPI_WEBHOOK_SECRET', 'OWNER_JID', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
-    // Setadas só se presentes no ambiente (fase 3C adiciona GOOGLE_SYNC_SECRET
-    // re-rodando este script).
-    envsOpcionais: ['GOOGLE_SYNC_SECRET'],
+    // Setadas só se presentes no ambiente (fase 3C adiciona GOOGLE_SYNC_SECRET;
+    // fase 3D adiciona as de transcrição — re-rodando este script).
+    envsOpcionais: ['GOOGLE_SYNC_SECRET', 'GROQ_API_KEY', 'UAZAPI_BASE_URL', 'UAZAPI_TOKEN', 'CRON_SECRET'],
     healthPath: '/api/webhook/uazapi',
   },
   'fireflies-webhook': {
@@ -110,6 +113,19 @@ async function main() {
   const envValues = Object.fromEntries(proj.envs.map((k) => [k, need(k)]));
   for (const k of proj.envsOpcionais || []) {
     if (process.env[k]) envValues[k] = process.env[k];
+  }
+  // Fase 3D é tudo-ou-nada: GROQ_API_KEY sem o resto deixaria o endpoint de
+  // transcrição inoperante (sem uazapi) ou aberto (sem CRON_SECRET).
+  if (alvo === 'webhook' && envValues.GROQ_API_KEY) {
+    for (const k of ['UAZAPI_BASE_URL', 'UAZAPI_TOKEN', 'CRON_SECRET']) {
+      if (!envValues[k]) {
+        console.error(JSON.stringify({
+          ok: false,
+          erro: `transcricao (GROQ_API_KEY) exige tambem ${k} — passe as 4 envs da fase 3D juntas`,
+        }));
+        process.exit(2);
+      }
+    }
   }
 
   // 1. Cria o projeto (409 = já existe, segue em frente).

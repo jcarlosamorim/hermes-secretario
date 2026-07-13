@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { computeSla, validateTaskInput, formatCard, groupByChat, SLA_HORAS } from '../agente/secretario.mjs';
 import { extractProjectRef } from '../agente/instalar-banco.mjs';
 import { PROJETOS } from '../agente/instalar-webhook.mjs';
+import { isAudioMessage } from '../webhook/lib/transcribe.js';
 
 let passed = 0;
 function ok(desc, fn) {
@@ -185,6 +186,32 @@ ok('rejeita URL que nao e do formato do projeto', () => {
   assert.equal(extractProjectRef('https://supabase.com/dashboard/project/abc'), null);
   assert.equal(extractProjectRef('https://abc123.supabase.co/rest/v1'), null);
   assert.equal(extractProjectRef(''), null);
+});
+
+// --- isAudioMessage (transcrição, fase 3D) ---
+ok('detecta audio nos dois formatos de payload da uazapi', () => {
+  const baileys = {
+    message: {
+      key: { id: 'M1', remoteJid: '5511@s.whatsapp.net' },
+      message: { audioMessage: {} },
+      messageTimestamp: 1750000000,
+    },
+  };
+  const flattened = { message: { messageid: 'M2', chatid: '5511@s.whatsapp.net', messageType: 'ptt' } };
+  assert.equal(isAudioMessage(baileys), true);
+  assert.equal(isAudioMessage(flattened), true);
+});
+ok('texto e payload irreconhecivel nao sao audio', () => {
+  const texto = {
+    message: {
+      key: { id: 'M3', remoteJid: '5511@s.whatsapp.net' },
+      message: { conversation: 'oi' },
+      messageTimestamp: 1750000000,
+    },
+  };
+  assert.equal(isAudioMessage(texto), false);
+  assert.equal(isAudioMessage({ foo: 'bar' }), false);
+  assert.equal(isAudioMessage(null), false);
 });
 
 // --- PROJETOS (instalar-webhook) ---

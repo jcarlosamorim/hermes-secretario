@@ -15,6 +15,7 @@ import { waitUntil } from '@vercel/functions';
 import { extractSignals } from '../../lib/extract.js';
 import { evaluateRelevance } from '../../lib/filter.js';
 import { getSupabase } from '../../lib/supabase.js';
+import { isAudioMessage, transcribeAudioMessage } from '../../lib/transcribe.js';
 import { logDecision, logValidationFailure, logInsertError } from '../../lib/logger.js';
 
 function secretMatches(provided, expected) {
@@ -98,6 +99,42 @@ async function processBody(rawBody) {
   if (!relevant) return;
 
   await persist(signals, body);
+  await transcribeInline(signals, body);
+}
+
+// Hot-path da transcrição (fase 3D, opcional): áudio recém-capturado vira
+// text_content em segundos, sem cron. Falhou? Fica text_content null e a
+// vassoura diária (api/cron/transcribe.js) recolhe. Sem GROQ_API_KEY, é um
+// no-op silencioso (fase não instalada).
+async function transcribeInline(signals, rawBody) {
+  if (!process.env.GROQ_API_KEY) return;
+  if (signals.textContent) return;
+  if (!isAudioMessage(rawBody)) return;
+
+  try {
+    // A uazapi reentrega webhooks (retry); o payload não diz se é repetição.
+    // Checar o BANCO antes de transcrever evita pagar download + Groq de
+    // novo por um áudio que a entrega anterior (ou a vassoura) já resolveu.
+    const { data, error } = await getSupabase()
+      .from('whatsapp_messages')
+      .select('id, text_content')
+      .eq('uazapi_message_id', signals.messageId)
+      .maybeSingle();
+    if (error || !data || data.text_content) return;
+
+    const text = await transcribeAudioMessage({ uazapiMessageId: signals.messageId });
+    if (!text) return;
+
+    // Guard .is(text_content, null): nunca sobrescreve texto já gravado.
+    const { error: upErr } = await getSupabase()
+      .from('whatsapp_messages')
+      .update({ text_content: text })
+      .eq('id', data.id)
+      .is('text_content', null);
+    if (upErr) logInsertError(signals.chatId, upErr);
+  } catch (err) {
+    logInsertError(signals.chatId, err);
+  }
 }
 
 export default async function handler(req, res) {

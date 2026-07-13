@@ -2,10 +2,19 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/webhook/uazapi.js": {
-      "maxDuration": 10
+      "maxDuration": 60
     },
     "api/webhook/google.js": {
       "maxDuration": 10
+    },
+    "api/cron/transcribe.js": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/transcribe",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }
