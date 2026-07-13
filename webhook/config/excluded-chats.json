@@ -1,0 +1,4 @@
+{
+  "_doc": "chat_ids que o webhook descarta SEMPRE (bots ruidosos, grupos de broadcast). Formato: '5511999999999@s.whatsapp.net' (DM) ou '1203...@g.us' (grupo). Requer redeploy do webhook após editar.",
+  "excludedChatIds": []
+}
