@@ -33,9 +33,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   sla_at                TIMESTAMPTZ,
   sla_regra             TEXT,
 
-  -- Rastreio do card publicado no grupo do Telegram.
-  telegram_topic        TEXT CHECK (telegram_topic IN ('pessoal', 'empresa')),
-  telegram_message_id   BIGINT,
+  -- Referência livre do card publicado pelo Hermes (id de mensagem do
+  -- Telegram, link, id de card). Gravada via comando ack-card.
+  card_ref              TEXT,
 
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()

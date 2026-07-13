@@ -1,20 +1,24 @@
 #!/usr/bin/env node
-// Hermes Secretário: CLI que o agente de triagem usa pra operar o sistema.
-// Node 18+, zero dependências (só fetch nativo). O agente NUNCA fala com o
-// banco ou com o Telegram por conta própria: tudo passa por estes comandos.
+// Hermes Secretário: CLI que o Hermes usa pra operar o sistema de triagem.
+// Node 18+, zero dependências (só fetch nativo). O Hermes NUNCA fala com o
+// banco por conta própria: toda leitura e escrita passa por estes comandos.
+// Publicar o card no Telegram é responsabilidade do Hermes (o comando
+// create-task devolve o card pronto em texto).
 //
 // Comandos:
 //   fetch-pending                     conversas pendentes de triagem (JSON)
-//   create-task '<json>'              cria task + publica card no tópico + marca processadas
+//   create-task '<json>'              cria task, marca msgs processadas, devolve card pronto
+//   ack-card <task_uuid> <card_ref>   registra onde o card foi publicado
 //   mark-processed <uuid> [...]       arquiva mensagens de ruído (sem task)
 //   list-open [--vencidas]            tasks abertas (opcional: só SLA vencido)
-//   close-task <uuid> [motivo]        conclui task e anota no card do Telegram
-//   repost-task <uuid>                republica o card (se o Telegram falhou no create)
-//   post-radar '<texto>'              mensagem livre no tópico Radar
+//   close-task <uuid> [motivo]        conclui task
 //   log-run '<json>'                  grava auditoria da varredura em triagem_runs
 //
-// Segurança: nunca expõe raw_payload; enums validados por ALLOWLIST
-// (fail-closed: valor desconhecido é erro, nunca default silencioso).
+// Credenciais (nada além destas duas no ambiente):
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+//
+// Segurança: nunca expõe raw_payload; enums vindos de julgamento validados
+// por ALLOWLIST (fail-closed: valor desconhecido é erro, nunca default).
 
 import { pathToFileURL } from 'node:url';
 
@@ -57,38 +61,6 @@ async function pg(path, { method = 'GET', body, headers = {} } = {}) {
 
 function inList(ids) {
   return `in.(${ids.map((i) => `"${i}"`).join(',')})`;
-}
-
-// ---------------------------------------------------------------------------
-// Telegram helpers
-// ---------------------------------------------------------------------------
-
-const TOPIC_ENV = {
-  radar: 'TELEGRAM_TOPIC_RADAR',
-  pessoal: 'TELEGRAM_TOPIC_PESSOAL',
-  empresa: 'TELEGRAM_TOPIC_EMPRESA',
-};
-
-async function tgSend(topic, text, replyToMessageId = null) {
-  const envName = TOPIC_ENV[topic];
-  if (!envName) throw new Error(`topico desconhecido: ${topic}`);
-  const token = need('TELEGRAM_BOT_TOKEN');
-  const body = {
-    chat_id: need('TELEGRAM_CHAT_ID'),
-    message_thread_id: Number(need(envName)),
-    text,
-    // Texto puro de propósito: parse_mode quebraria com _ * [ ] vindos de
-    // mensagens reais. Formatação é por emoji/linha, não por markup.
-  };
-  if (replyToMessageId) body.reply_to_message_id = Number(replyToMessageId);
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(`Telegram: ${data.description || res.status}`);
-  return data.result.message_id;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +117,8 @@ export function validateTaskInput(input) {
 
 const PRIO_EMOJI = { critica: '🔴', alta: '🟠', media: '🟡', baixa: '⚪' };
 
+// Card pronto pro Hermes publicar no tópico da categoria. Texto puro de
+// propósito: markup quebraria com _ * [ ] vindos de mensagens reais.
 export function formatCard(task) {
   const linhas = [];
   linhas.push(`${PRIO_EMOJI[task.prioridade] || '⚪'} ${task.categoria.toUpperCase()} · ${task.titulo}`);
@@ -255,7 +229,7 @@ async function cmdCreateTask(jsonArg) {
   };
 
   // Upsert com ignore-duplicates: retry após falha parcial não duplica task.
-  let inserted = await pg('tasks?on_conflict=whatsapp_message_id', {
+  const inserted = await pg('tasks?on_conflict=whatsapp_message_id', {
     method: 'POST',
     body: row,
     headers: { prefer: 'return=representation,resolution=ignore-duplicates' },
@@ -269,30 +243,32 @@ async function cmdCreateTask(jsonArg) {
     if (!task) return fail('conflito no insert mas task existente nao encontrada');
   }
 
-  // Publica o card no tópico da categoria. Falha aqui NÃO desfaz a task:
-  // use repost-task pra republicar.
-  let telegramError = null;
-  if (!task.telegram_message_id) {
-    try {
-      const msgId = await tgSend(task.categoria, formatCard({ ...task, origem }));
-      const updated = await pg(`tasks?id=eq.${task.id}`, {
-        method: 'PATCH',
-        body: { telegram_message_id: msgId, telegram_topic: task.categoria, updated_at: new Date().toISOString() },
-        headers: { prefer: 'return=representation' },
-      });
-      task = updated[0] || task;
-    } catch (err) {
-      telegramError = err.message;
-    }
-  }
-
   // Marca TODAS as mensagens da conversa como processadas (descarte do acúmulo).
   await pg(`whatsapp_messages?id=${inList(input.message_ids)}`, {
     method: 'PATCH',
     body: { processed: true },
   });
 
-  print({ ok: true, ja_existia: jaExistia, telegram_error: telegramError, task });
+  print({
+    ok: true,
+    ja_existia: jaExistia,
+    // Onde publicar e o quê: o Hermes posta este card no tópico da categoria.
+    // ja_existia=true e card_ref preenchido = card já publicado antes, NÃO republique.
+    topico: task.categoria,
+    card: formatCard({ ...task, origem }),
+    task,
+  });
+}
+
+async function cmdAckCard(taskId, cardRef) {
+  if (!taskId || !cardRef) return fail('uso: ack-card <task_uuid> <card_ref>');
+  const updated = await pg(`tasks?id=eq.${taskId}`, {
+    method: 'PATCH',
+    body: { card_ref: cardRef, updated_at: new Date().toISOString() },
+    headers: { prefer: 'return=representation' },
+  });
+  if (!updated.length) return fail(`task ${taskId} nao encontrada`);
+  print({ ok: true, task: updated[0] });
 }
 
 async function cmdMarkProcessed(ids) {
@@ -326,36 +302,7 @@ async function cmdCloseTask(id, motivo) {
     headers: { prefer: 'return=representation' },
   });
   if (!updated.length) return fail(`task ${id} nao encontrada ou ja fechada`);
-  const task = updated[0];
-  // Anota no card original (best-effort: falha não desfaz a conclusão).
-  let telegramError = null;
-  if (task.telegram_topic && task.telegram_message_id) {
-    try {
-      await tgSend(task.telegram_topic, `✅ Concluída: ${task.titulo}`, task.telegram_message_id);
-    } catch (err) {
-      telegramError = err.message;
-    }
-  }
-  print({ ok: true, telegram_error: telegramError, task });
-}
-
-async function cmdRepostTask(id) {
-  if (!id) return fail('uso: repost-task <uuid>');
-  const rows = await pg(`tasks?id=eq.${id}&select=*`);
-  if (!rows.length) return fail(`task ${id} nao encontrada`);
-  const task = rows[0];
-  const msgId = await tgSend(task.categoria, formatCard(task));
-  await pg(`tasks?id=eq.${id}`, {
-    method: 'PATCH',
-    body: { telegram_message_id: msgId, telegram_topic: task.categoria, updated_at: new Date().toISOString() },
-  });
-  print({ ok: true, telegram_message_id: msgId });
-}
-
-async function cmdPostRadar(texto) {
-  if (!texto) return fail("uso: post-radar '<texto>'");
-  const msgId = await tgSend('radar', texto);
-  print({ ok: true, telegram_message_id: msgId });
+  print({ ok: true, task: updated[0] });
 }
 
 async function cmdLogRun(jsonArg) {
@@ -398,32 +345,32 @@ function fail(msg) {
   process.exit(1);
 }
 
-const USO = `hermes-secretario CLI (v1)
+const USO = `hermes-secretario CLI (v2)
 
   fetch-pending                    conversas pendentes de triagem
-  create-task '<json>'             cria task + card no topico + marca processadas
+  create-task '<json>'             cria task, marca processadas, devolve card pronto
+  ack-card <task_uuid> <card_ref>  registra onde o card foi publicado
   mark-processed <uuid> [...]      arquiva ruido sem criar task
   list-open [--vencidas]           tasks abertas
   close-task <uuid> [motivo]       conclui task
-  repost-task <uuid>               republica card no Telegram
-  post-radar '<texto>'             mensagem no topico Radar
   log-run '<json>'                 grava auditoria da varredura
 
 create-task espera: { titulo, resumo, categoria: pessoal|empresa,
   prioridade: critica|alta|media|baixa, confianca: alta|media|baixa,
   message_ids: [uuid...], tipo?, requer_resposta?, acao_sugerida?,
-  prazo_texto?, prazo_previsto? (ISO com offset), responsavel? }`;
+  prazo_texto?, prazo_previsto? (ISO com offset), responsavel? }
+
+env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (nada alem disso)`;
 
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   switch (cmd) {
     case 'fetch-pending': return cmdFetchPending();
     case 'create-task': return cmdCreateTask(args[0]);
+    case 'ack-card': return cmdAckCard(args[0], args.slice(1).join(' '));
     case 'mark-processed': return cmdMarkProcessed(args);
     case 'list-open': return cmdListOpen(args);
     case 'close-task': return cmdCloseTask(args[0], args.slice(1).join(' '));
-    case 'repost-task': return cmdRepostTask(args[0]);
-    case 'post-radar': return cmdPostRadar(args.join(' '));
     case 'log-run': return cmdLogRun(args[0]);
     default:
       console.log(USO);
