@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { computeSla, validateTaskInput, formatCard, groupByChat, SLA_HORAS } from '../agente/secretario.mjs';
 import { extractProjectRef } from '../agente/instalar-banco.mjs';
+import { PROJETOS } from '../agente/instalar-webhook.mjs';
 
 let passed = 0;
 function ok(desc, fn) {
@@ -169,6 +170,23 @@ ok('rejeita URL que nao e do formato do projeto', () => {
   assert.equal(extractProjectRef('https://supabase.com/dashboard/project/abc'), null);
   assert.equal(extractProjectRef('https://abc123.supabase.co/rest/v1'), null);
   assert.equal(extractProjectRef(''), null);
+});
+
+// --- PROJETOS (instalar-webhook) ---
+ok('manifests dos deploys incluem package.json e vercel.json', () => {
+  for (const proj of Object.values(PROJETOS)) {
+    assert.ok(proj.files.includes('package.json'), `${proj.name} sem package.json`);
+    assert.ok(proj.files.includes('vercel.json'), `${proj.name} sem vercel.json`);
+    assert.ok(proj.envs.length >= 4, `${proj.name} com envs de menos`);
+    assert.match(proj.healthPath, /^\/api\//);
+  }
+});
+ok('os dois projetos existem e compartilham as envs do Supabase', () => {
+  assert.deepEqual(Object.keys(PROJETOS).sort(), ['fireflies-webhook', 'webhook']);
+  for (const proj of Object.values(PROJETOS)) {
+    assert.ok(proj.envs.includes('SUPABASE_URL'));
+    assert.ok(proj.envs.includes('SUPABASE_SERVICE_ROLE_KEY'));
+  }
 });
 
 console.log(`\n${passed} asserts passando`);

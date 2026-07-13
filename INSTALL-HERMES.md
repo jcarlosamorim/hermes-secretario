@@ -32,9 +32,10 @@ depender da própria memória pra não perder pedido, prazo e cobrança.
 | Arquivo | Pra quê |
 |---|---|
 | `agente/instalar-banco.mjs` | VOCÊ roda na fase 1: cria as tabelas sozinho |
+| `agente/instalar-webhook.mjs` | VOCÊ roda nas fases 2 e 3B: deploya na Vercel sozinho |
 | `migrations/001..004*.sql` | o SQL que o instalar-banco executa (não peça pro humano colar) |
-| `webhook/` | projeto que o humano importa na Vercel (fase 2) |
-| `fireflies-webhook/` | segundo projeto Vercel, só na fase 3B (opcional) |
+| `webhook/` | código da captura WhatsApp (o instalar-webhook sobe na fase 2) |
+| `fireflies-webhook/` | código da captura de reuniões, só na fase 3B (opcional) |
 | `agente/secretario.mjs` | sua ferramenta de operação (fase 4: instale em você) |
 | `agente/AGENTE-TRIAGEM.md` | sua rotina permanente de triagem (fase 4) |
 
@@ -158,35 +159,60 @@ Pergunte também o **número de WhatsApp monitorado** com DDI, só dígitos
 (ex.: `5511999998888`). Guarde como `OWNER_JID` (esse pode circular em
 chat, não é segredo).
 
-### 2.2 Deploy (ele executa no browser, você dita)
+### 2.2 Token da Vercel (ele cola, você guarda)
 
-> Acesse https://vercel.com, crie a conta (pode entrar com GitHub).
-> Clique em **Add New > Project** e importe este repositório
-> (`https://github.com/jcarlosamorim/hermes-secretario`). Antes de clicar em Deploy:
-> 1. **Root Directory**: clique em Edit e selecione a pasta **`webhook`**.
-> 2. Em **Environment Variables**, adicione as 4 que eu vou te passar.
+O humano NÃO importa repositório nem preenche formulário: você mesmo faz
+o deploy no passo 2.3. Peça só o token:
 
-Passe a ele as 4 variáveis (aqui pode, ele é o dono delas; mande cada
-valor isolado numa mensagem própria pra facilitar o copiar-colar):
-`UAZAPI_WEBHOOK_SECRET`, `OWNER_JID`, `SUPABASE_URL`,
-`SUPABASE_SERVICE_ROLE_KEY`.
+> Acesse https://vercel.com e crie uma conta (a free serve). Depois:
+> clique no seu avatar > **Account Settings** > **Tokens** >
+> **Create Token**. Nome: `instalacao-hermes`. Scope: **Full Account**.
+> Expiration: **1 day**. Copie o token e me mande. Ele é TEMPORÁRIO:
+> expira sozinho em 1 dia e, quando os deploys terminarem, você o revoga.
 
-> Clique em **Deploy** e, quando terminar, me mande a URL de produção
-> (formato `https://alguma-coisa.vercel.app`).
+Guarde como `VERCEL_TOKEN`.
 
-### 2.3 Validação da fase (você executa)
+### 2.3 Deploy (VOCÊ executa)
+
+Baixe `agente/instalar-webhook.mjs` deste repo (raw do GitHub) e rode:
 
 ```bash
-curl -s https://<projeto>.vercel.app/api/webhook/uazapi
+VERCEL_TOKEN=... UAZAPI_WEBHOOK_SECRET=... OWNER_JID=... \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node instalar-webhook.mjs webhook
+```
+
+O script cria o projeto `hermes-secretario-webhook`, configura as 4 env
+vars de produção, sobe os arquivos direto pela API (sem git, sem
+integração GitHub), espera o build ficar READY e já faz o health check.
+Re-rodar é seguro (atualiza envs e redeploya). Guarde a `url_producao`
+do output: ela entra no registro da uazapi na fase 3.
+
+| Erro | Causa provável |
+|---|---|
+| `403`/`Not authorized` | token errado, expirado ou sem scope Full Account (volte ao 2.2) |
+| `build terminou em ERROR` | veja os logs no painel da Vercel; caso típico: arquivo faltando no download (rode de novo) |
+| `health_check` sem `hermes-secretario-webhook ok` | env faltando; confira o output do passo de env vars e re-rode |
+
+Plano B (só se você não tiver como rodar Node): mande o humano clicar no
+Deploy Button, que clona o repo pra conta GitHub dele e pede as envs no
+browser:
+`https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fjcarlosamorim%2Fhermes-secretario&root-directory=webhook&project-name=hermes-secretario-webhook&env=UAZAPI_WEBHOOK_SECRET,OWNER_JID,SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY`
+(nesse caso, passe a ele os 4 valores, um por mensagem, e peça a URL de
+produção no final).
+
+### 2.4 Validação da fase (você executa)
+
+```bash
+curl -s https://<url_producao>/api/webhook/uazapi
 ```
 
 Esperado: `hermes-secretario-webhook ok`. Um POST sem secret deve dar 401
 (isso é o certo: fail-closed).
 
-| Erro | Causa provável |
-|---|---|
-| 404 | Root Directory não foi setado pra `webhook` (redeploy) |
-| 500 | env faltando (conferir as 4 no painel do projeto > Settings > Environment Variables e redeploy) |
+**Token:** se o humano NÃO vai usar Fireflies (fase 3B), diga a ele pra
+revogar o `VERCEL_TOKEN` agora (Account Settings > Tokens > Revoke) e
+descarte sua cópia. Se vai usar, guarde o token até o fim da 3B.
 
 ---
 
@@ -264,17 +290,21 @@ Guarde como `FIREFLIES_API_KEY`. Gere você mesmo mais dois segredos:
   (limite do próprio Fireflies): `openssl rand -hex 12` gera 24, serve.
 - `CRON_SECRET`: `openssl rand -hex 16` (protege o cron de disparo alheio).
 
-### 3B.2 Segundo projeto na Vercel (ele executa no browser, você dita)
+### 3B.2 Segundo projeto na Vercel (VOCÊ executa)
 
-> Na Vercel: **Add New > Project**, importe o MESMO repositório de antes.
-> **Root Directory**: desta vez selecione a pasta **`fireflies-webhook`**.
-> Em Environment Variables, adicione as 5 que eu vou te passar, e Deploy.
+Use o mesmo `instalar-webhook.mjs` da fase 2 (e o mesmo `VERCEL_TOKEN`;
+se ele já foi revogado/expirou, peça outro como no 2.2):
 
-Passe: `FIREFLIES_WEBHOOK_SECRET`, `FIREFLIES_API_KEY`, `CRON_SECRET`,
-`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. Peça a URL de produção.
+```bash
+VERCEL_TOKEN=... FIREFLIES_WEBHOOK_SECRET=... FIREFLIES_API_KEY=... \
+CRON_SECRET=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node instalar-webhook.mjs fireflies-webhook
+```
 
-Valide: `curl -s https://<projeto-ff>.vercel.app/api/webhook` deve
-responder `hermes-secretario-fireflies ok`.
+O health check do output deve responder `hermes-secretario-fireflies ok`.
+Guarde a `url_producao`. **Depois deste deploy o token da Vercel não é
+mais necessário**: diga ao humano pra revogá-lo (Account Settings >
+Tokens > Revoke) e descarte sua cópia.
 
 ### 3B.3 Registrar o webhook no Fireflies (ele executa; não existe API)
 

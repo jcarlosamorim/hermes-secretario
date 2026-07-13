@@ -34,10 +34,12 @@ Hermes** e diga:
 
 Ele conduz a instalação em 4 fases, validando cada uma: (1) você cria o
 projeto no Supabase e cola as credenciais, e ELE cria as tabelas sozinho,
-(2) subir o webhook na Vercel, (3) conectar seu WhatsApp na uazapi,
-(3B, opcional) ligar o Fireflies pra reuniões virarem tasks também, (4)
-instalar a rotina de triagem nele mesmo. Você nunca toca em SQL nem em
-terminal: só cria contas e cola credenciais quando ele pedir.
+(2) você cola um token temporário da Vercel e ELE deploya o webhook
+sozinho, (3) conectar seu WhatsApp na uazapi, (3B, opcional) ligar o
+Fireflies pra reuniões virarem tasks também, (4) instalar a rotina de
+triagem nele mesmo. Você nunca toca em SQL, terminal ou formulário de
+deploy: só cria contas e cola credenciais quando ele pedir, e revoga os
+tokens temporários quando ele mandar.
 
 ## O que você vai precisar ter (ou criar durante a instalação)
 
