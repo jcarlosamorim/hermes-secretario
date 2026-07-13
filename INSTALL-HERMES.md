@@ -34,8 +34,9 @@ depender da própria memória pra não perder pedido, prazo e cobrança.
 | `agente/instalar-banco.mjs` | VOCÊ roda na fase 1: cria as tabelas sozinho |
 | `agente/instalar-webhook.mjs` | VOCÊ roda nas fases 2 e 3B: deploya na Vercel sozinho |
 | `migrations/001..004*.sql` | o SQL que o instalar-banco executa (não peça pro humano colar) |
-| `webhook/` | código da captura WhatsApp (o instalar-webhook sobe na fase 2) |
+| `webhook/` | código da captura WhatsApp + rota Google (o instalar-webhook sobe na fase 2) |
 | `fireflies-webhook/` | código da captura de reuniões, só na fase 3B (opcional) |
+| `google-sync/Code.gs` | Apps Script de Gmail+Agenda, só na fase 3C (opcional) |
 | `agente/secretario.mjs` | sua ferramenta de operação (fase 4: instale em você) |
 | `agente/AGENTE-TRIAGEM.md` | sua rotina permanente de triagem (fase 4) |
 
@@ -57,6 +58,9 @@ Confirme com o humano, antes de começar:
 - [ ] Pergunte: ele usa **Fireflies** pra gravar/transcrever reuniões?
       Se sim, a fase 3B (opcional) liga as reuniões como segunda fonte.
       Se não, pule a 3B sem culpa: dá pra ligar depois.
+- [ ] Pergunte: ele quer ligar o **Gmail** (emails que exigem ação viram
+      task) e o **Google Agenda** (você checa os compromissos dele nas
+      varreduras)? Se sim, fase 3C (opcional). Também dá pra ligar depois.
 - [ ] Você consegue rodar `node --version` (18+) no seu ambiente. Se não
       conseguir, avise que vai operar em modo "comandos prontos pra ele".
 
@@ -302,9 +306,10 @@ CRON_SECRET=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 ```
 
 O health check do output deve responder `hermes-secretario-fireflies ok`.
-Guarde a `url_producao`. **Depois deste deploy o token da Vercel não é
-mais necessário**: diga ao humano pra revogá-lo (Account Settings >
-Tokens > Revoke) e descarte sua cópia.
+Guarde a `url_producao`. **Token:** se a fase 3C (Gmail/Agenda) NÃO vai
+acontecer, o token da Vercel não é mais necessário: diga ao humano pra
+revogá-lo (Account Settings > Tokens > Revoke) e descarte sua cópia. Se a
+3C vem a seguir, guarde-o até o fim do 3C.1.
 
 ### 3B.3 Registrar o webhook no Fireflies (ele executa; não existe API)
 
@@ -351,6 +356,78 @@ instalar-banco (idempotente) e mande revogar o token de novo.
 
 ---
 
+## FASE 3C — Gmail + Google Agenda (OPCIONAL)
+
+Só execute se o humano quis (checklist da fase 0). Sem Google Cloud
+Console, sem OAuth manual: um **Google Apps Script** na conta dele
+sincroniza Gmail e Agenda a cada 15 min pro webhook da fase 2 (rota
+`/api/webhook/google`). Emails viram candidatos a task (você tria com a
+barra "ação humana necessária" da sua rotina); a agenda entra só como
+CHECAGEM (`fetch-agenda`), nunca como fonte de task.
+
+### 3C.1 Secret + redeploy do webhook (VOCÊ executa)
+
+Gere `GOOGLE_SYNC_SECRET` (`openssl rand -hex 16`). Re-rode o
+instalar-webhook da fase 2 com ela no ambiente (mesmo `VERCEL_TOKEN`; se
+já expirou/foi revogado, peça outro como no 2.2). As 4 envs da fase 2
+continuam obrigatórias no comando (o script upserta todas e redeploya):
+
+```bash
+VERCEL_TOKEN=... GOOGLE_SYNC_SECRET=... UAZAPI_WEBHOOK_SECRET=... \
+OWNER_JID=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node instalar-webhook.mjs webhook
+```
+
+Valide: `curl -s https://<url_producao>/api/webhook/google` deve responder
+`hermes-secretario-google ok`. Se nenhuma outra fase Vercel resta, mande
+revogar o `VERCEL_TOKEN` agora.
+
+Se o banco foi criado antes da migration 005 existir: peça um novo
+Personal Access Token temporário do Supabase, re-rode o
+`instalar-banco.mjs` (idempotente) e mande revogar de novo.
+
+### 3C.2 Instalar o Apps Script (ele executa, você prepara)
+
+1. Pegue `google-sync/Code.gs` deste repo e substitua a linha
+   `WEBHOOK_URL` pela URL real:
+   `https://<url_producao>/api/webhook/google?secret=<GOOGLE_SYNC_SECRET>`.
+2. Mande o arquivo PRONTO pro humano, com a instrução:
+
+> Acesse https://script.google.com e clique em **New project**. Apague o
+> conteúdo, cole o código que te mandei e salve (nome: "Hermes
+> Secretário"). Na barra de cima, selecione a função **setup** e clique
+> em **Run**. O Google vai pedir autorização de Gmail e Agenda: revise e
+> permita — o código é exatamente o que você colou, e ele envia só
+> remetente, assunto e o começo de cada email (800 caracteres), nunca o
+> corpo inteiro. Quando o log disser "instalado", me avise.
+
+Este é o único ponto do sistema em que uma URL com secret fica com o
+humano (dentro do script, na conta Google dele). Aceitável: o script é
+dele e roda na conta dele. Não cole essa URL em mais lugar nenhum.
+
+### 3C.3 Validação da fase (você executa)
+
+O `setup` já roda a primeira sync. Confira as duas tabelas:
+
+```bash
+curl -s "$SUPABASE_URL/rest/v1/gmail_messages?select=subject,processed&order=received_at.desc&limit=3" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"
+
+curl -s "$SUPABASE_URL/rest/v1/calendar_events?select=title,starts_at&order=starts_at.asc&limit=3" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"
+```
+
+| Sintoma | Causa provável |
+|---|---|
+| tabelas não existem (404) | banco criado antes da migration 005 (ver fim do 3C.1) |
+| nada chega | `WEBHOOK_URL`/secret errados no Code.gs (o setup loga o erro HTTP: peça o log ao humano) |
+| chegam emails de Promoções/Social | não deveria: a `GMAIL_QUERY` do script os exclui; se vazar, ajuste a query no script |
+| agenda vazia | normal se não há eventos nos próximos 7 dias |
+
+---
+
 ## FASE 4 — Instalar a rotina de triagem em você mesmo
 
 Agora o pipeline captura sozinho; falta você virar o triador.
@@ -359,10 +436,10 @@ Agora o pipeline captura sozinho; falta você virar o triador.
    `/data/bin/secretario.mjs`).
 2. Configure no ambiente do processo APENAS: `SUPABASE_URL` e
    `SUPABASE_SERVICE_ROLE_KEY`.
-3. Verifique: `node secretario.mjs` sem argumentos deve listar 9 comandos
-   (`fetch-pending`, `fetch-meetings`, `create-task`, `ack-card`,
-   `mark-processed`, `mark-meeting-processed`, `list-open`, `close-task`,
-   `log-run`).
+3. Verifique: `node secretario.mjs` sem argumentos deve listar 12 comandos
+   (`fetch-pending`, `fetch-meetings`, `fetch-emails`, `fetch-agenda`,
+   `create-task`, `ack-card`, `mark-processed`, `mark-meeting-processed`,
+   `mark-email-processed`, `list-open`, `close-task`, `log-run`).
 4. Leia `agente/AGENTE-TRIAGEM.md` INTEIRO e adote como sua rotina
    permanente (instrução/memória de longo prazo). Ele define seu ciclo
    horário, seus critérios de julgamento e onde publicar cada card.

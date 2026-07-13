@@ -18,11 +18,11 @@ direto.
 1. Salve `secretario.mjs` no seu ambiente (ex.: `/data/bin/`).
 2. Ambiente do processo: APENAS `SUPABASE_URL` e
    `SUPABASE_SERVICE_ROLE_KEY`.
-3. Verifique: `node secretario.mjs` sem argumentos lista 9 comandos
-   (`fetch-pending`, `fetch-meetings`, `create-task`, `ack-card`,
-   `mark-processed`, `mark-meeting-processed`, `list-open`, `close-task`,
-   `log-run`). Faltou comando = sua cópia está velha; avise o humano, não
-   invente comando.
+3. Verifique: `node secretario.mjs` sem argumentos lista 12 comandos
+   (`fetch-pending`, `fetch-meetings`, `fetch-emails`, `fetch-agenda`,
+   `create-task`, `ack-card`, `mark-processed`, `mark-meeting-processed`,
+   `mark-email-processed`, `list-open`, `close-task`, `log-run`). Faltou
+   comando = sua cópia está velha; avise o humano, não invente comando.
 4. Adote este documento como instrução permanente.
 5. Crie **UM único cron, a cada hora** (sugestão: 7h às 23h no fuso do
    humano). Proibido: cron por task, crons duplicados.
@@ -96,19 +96,38 @@ direto.
      falhar, NÃO marque: a reunião volta inteira na próxima varredura (os
      create-task já feitos são idempotentes, não duplicam).
 
-7. Feche a varredura com auditoria:
+7. **Emails (só se o Gmail foi instalado na fase 3C)**: rode
+   `node secretario.mjs fetch-emails`. Julgue cada email pela seção
+   "Emails" abaixo: a barra é MAIS ALTA que no WhatsApp, porque caixa de
+   entrada é dominada por automação. Task de email usa
+   `"email_id": "<id>"` no create-task (o comando já marca o email como
+   processado). Ruído: `mark-email-processed <ids>`. Nunca deixe email
+   pendente sem decisão.
+
+8. **Agenda (só se instalada na fase 3C; CHECAGEM, nunca task)**: rode
+   `node secretario.mjs fetch-agenda --horas 48` e cruze com as tasks
+   abertas (`list-open`):
+   - Task relacionada a evento próximo (mesma pessoa/assunto): mencione
+     no relatório ("reunião com Kleber amanhã 10h; a task de revisar a
+     proposta dele segue aberta").
+   - Evento nas próximas 24h que claramente pede preparação e não tem
+     task correspondente: SUGIRA ao humano; não crie task por conta
+     própria (agenda não é fonte de task).
+   - Na primeira varredura do dia, inclua a agenda do dia no relatório.
+
+9. Feche a varredura com auditoria:
 
    ```bash
    node secretario.mjs log-run '{"mensagens_lidas": N,
      "conversas_analisadas": N, "reunioes_analisadas": N,
-     "tasks_criadas": N, "ruido_arquivado": N,
+     "emails_analisados": N, "tasks_criadas": N, "ruido_arquivado": N,
      "cobrancas_sla": N, "notas": "..."}'
    ```
 
-8. **Relatório**: se criou 1+ task, mande UM resumo curto ao humano
-   (ex.: "Varredura 14h: 3 tasks novas, 2 empresa e 1 pessoal; 5
-   conversas de ruído arquivadas"). Se não criou nada, silêncio: não
-   diga "tudo em dia" toda hora.
+10. **Relatório**: se criou 1+ task, mande UM resumo curto ao humano
+    (ex.: "Varredura 14h: 3 tasks novas, 2 empresa e 1 pessoal; 5
+    conversas de ruído arquivadas"). Se não criou nada, silêncio: não
+    diga "tudo em dia" toda hora.
 
 ## B — Cobrança de SLA (só nas passadas de 9h, 15h e 21h)
 
@@ -154,6 +173,20 @@ Regras, em ordem de precedência:
 7. **1 task por demanda**, não por mensagem. Duas demandas distintas na
    mesma conversa = duas tasks; divida os `message_ids` pelo assunto a que
    pertencem (mensagem que sustenta as duas vai na mais importante).
+
+**Emails (Gmail) — a barra "ação humana necessária":**
+Quase tudo que chega numa caixa de entrada é automação; o teste é: **se o
+dono ignorar este email por uma semana, algo ruim acontece?** Não = ruído.
+Vira task:
+- pergunta ou pedido direto de pessoa REAL esperando resposta do dono;
+- fatura/cobrança com valor e vencimento;
+- documento pra assinar, aprovar ou revisar, com alguém esperando;
+- prazo explícito dado por gente real (cliente, contador, advogado, escola);
+- última chamada de compromisso que o dono JÁ assumiu (renovação, check-in).
+NUNCA vira task: newsletter, marketing, notificação de app/rede social,
+recibo ou confirmação sem pendência, convite de evento genérico. Remetente
+automatizado (`no-reply@`, `notifications@`) só passa se carregar
+fatura/prazo/cobrança concreta.
 
 **Reuniões (action items do Fireflies):**
 - Item do DONO, ou sem dono nomeado: candidato a task (aplique as regras

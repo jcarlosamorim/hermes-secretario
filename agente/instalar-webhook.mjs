@@ -30,6 +30,7 @@ export const PROJETOS = {
       'package.json',
       'vercel.json',
       'api/webhook/uazapi.js',
+      'api/webhook/google.js',
       'lib/extract.js',
       'lib/filter.js',
       'lib/supabase.js',
@@ -37,6 +38,9 @@ export const PROJETOS = {
       'config/excluded-chats.json',
     ],
     envs: ['UAZAPI_WEBHOOK_SECRET', 'OWNER_JID', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    // Setadas só se presentes no ambiente (fase 3C adiciona GOOGLE_SYNC_SECRET
+    // re-rodando este script).
+    envsOpcionais: ['GOOGLE_SYNC_SECRET'],
     healthPath: '/api/webhook/uazapi',
   },
   'fireflies-webhook': {
@@ -104,6 +108,9 @@ async function main() {
   }
   need('VERCEL_TOKEN');
   const envValues = Object.fromEntries(proj.envs.map((k) => [k, need(k)]));
+  for (const k of proj.envsOpcionais || []) {
+    if (process.env[k]) envValues[k] = process.env[k];
+  }
 
   // 1. Cria o projeto (409 = já existe, segue em frente).
   const created = await vercel('/v11/projects', { method: 'POST', body: { name: proj.name } });
@@ -113,9 +120,9 @@ async function main() {
   console.error(`projeto ${proj.name}: ${created.status === 409 ? 'ja existia' : 'criado'}`);
 
   // 2. Env vars de produção (upsert: re-rodar atualiza).
-  const envPayload = proj.envs.map((key) => ({
+  const envPayload = Object.entries(envValues).map(([key, value]) => ({
     key,
-    value: envValues[key],
+    value,
     type: 'encrypted',
     target: ['production'],
   }));
@@ -124,9 +131,12 @@ async function main() {
     body: envPayload,
   });
   if (envRes.status >= 400) {
-    throw new Error(`env vars: HTTP ${envRes.status}: ${JSON.stringify(envRes.data).slice(0, 300)}`);
+    // Só o objeto error da resposta: o body completo poderia ecoar os
+    // valores das envs recém-enviadas num erro de validação.
+    const motivo = JSON.stringify(envRes.data?.error || { status: envRes.status });
+    throw new Error(`env vars: HTTP ${envRes.status}: ${motivo.slice(0, 200)}`);
   }
-  console.error(`env vars configuradas: ${proj.envs.join(', ')}`);
+  console.error(`env vars configuradas: ${Object.keys(envValues).join(', ')}`);
 
   // 3. Sobe os arquivos e dispara o deploy de produção.
   const files = [];

@@ -8,20 +8,23 @@ o que vencer o prazo. Você para de depender da memória pra não perder
 pedido, prazo e cobrança.
 
 ```
-WhatsApp (uazapi) ──▶ webhook (Vercel) ──▶ whatsapp_messages ─┐
-                       sem LLM, só filtro                     │ (Supabase)
-Fireflies (opcional) ─▶ webhook (Vercel) ─▶ fireflies_meetings┘
-                        cron busca action items      │
+WhatsApp (uazapi) ──▶ webhook (Vercel) ──▶ whatsapp_messages ──┐
+                       sem LLM, só filtro                      │
+Fireflies (opcional) ─▶ webhook (Vercel) ─▶ fireflies_meetings ┤ (Supabase)
+                        cron busca action items                │
+Gmail + Agenda ───────▶ Apps Script ──▶ gmail_messages         │
+(opcional)              sync 15 min     calendar_events ───────┘
+                                                     │
                                                      ▼
                                   SEU HERMES (varre de hora em hora)
-                                  julga conversas e reuniões via
-                                  secretario.mjs e publica os cards
+                                  julga conversas, reuniões e emails;
+                                  checa a agenda; publica os cards
                                                      │
                                                      ▼
                           Grupo de vocês no Telegram
                           ├── 🏠 Tarefas Pessoais
                           ├── 🏢 Tarefas Empresa
-                          └── relatórios + cobranças de SLA
+                          └── relatórios + agenda + cobranças de SLA
 ```
 
 ## Como instalar
@@ -36,10 +39,12 @@ Ele conduz a instalação em 4 fases, validando cada uma: (1) você cria o
 projeto no Supabase e cola as credenciais, e ELE cria as tabelas sozinho,
 (2) você cola um token temporário da Vercel e ELE deploya o webhook
 sozinho, (3) conectar seu WhatsApp na uazapi, (3B, opcional) ligar o
-Fireflies pra reuniões virarem tasks também, (4) instalar a rotina de
-triagem nele mesmo. Você nunca toca em SQL, terminal ou formulário de
-deploy: só cria contas e cola credenciais quando ele pedir, e revoga os
-tokens temporários quando ele mandar.
+Fireflies pra reuniões virarem tasks também, (3C, opcional) ligar Gmail
+(só email que exige ação vira task) e Google Agenda (checagem dos seus
+compromissos), (4) instalar a rotina de triagem nele mesmo. Você nunca
+toca em SQL, terminal ou formulário de deploy: só cria contas e cola
+credenciais quando ele pedir, e revoga os tokens temporários quando ele
+mandar.
 
 ## O que você vai precisar ter (ou criar durante a instalação)
 
@@ -48,6 +53,8 @@ tokens temporários quando ele mandar.
 - Conta **uazapi** (paga) — a ponte com o WhatsApp.
 - Conta **Fireflies** (opcional) — se quiser que action items de reuniões
   também virem tasks.
+- Conta **Google** (opcional) — se quiser Gmail como fonte de task e a
+  Agenda checada nas varreduras (via Apps Script, sem Google Cloud).
 - O grupo do Telegram que você já usa com seu Hermes (com os tópicos
   Tarefas Pessoais e Tarefas Empresa; ele cria se faltar).
 
@@ -55,10 +62,12 @@ tokens temporários quando ele mandar.
 
 ```
 INSTALL-HERMES.md         runbook de instalação (escrito PRO seu Hermes)
-migrations/               4 SQLs do banco (o Hermes aplica na fase 1)
+migrations/               5 SQLs do banco (o Hermes aplica na fase 1)
 agente/instalar-banco.mjs cria as tabelas via Management API (fase 1)
-webhook/                  captura uazapi -> Supabase (deploy na fase 2)
+agente/instalar-webhook.mjs deploya na Vercel via token (fases 2/3B/3C)
+webhook/                  captura uazapi + rota Google -> Supabase (fase 2)
 fireflies-webhook/        captura Fireflies + cron de action items (fase 3B)
+google-sync/Code.gs       Apps Script: Gmail + Agenda a cada 15 min (fase 3C)
 agente/secretario.mjs     ferramenta que o Hermes usa pra operar (fase 4)
 agente/AGENTE-TRIAGEM.md  rotina permanente de triagem do Hermes (fase 4)
 test/test-secretario.mjs  asserts offline (node test/test-secretario.mjs)
@@ -70,6 +79,10 @@ test/test-secretario.mjs  asserts offline (node test/test-secretario.mjs)
   não leem nada; só a `service_role` (webhook + Hermes) acessa.
 - O Hermes nunca vê o payload bruto das mensagens (mídia, metadados):
   a ferramenta só entrega texto + remetente + data.
+- O corpo completo dos emails nunca sai da conta Google: o Apps Script
+  envia só remetente, assunto e os primeiros 800 caracteres em texto puro.
+- Agenda é checagem, não fonte: o Hermes cita compromissos e cruza com
+  tasks, mas nunca cria task a partir de evento.
 - Classificações do Hermes passam por allowlist no código: valor fora da
   lista é rejeitado, nunca aceito por omissão.
 - O webhook responde 200 antes de processar e valida secret com

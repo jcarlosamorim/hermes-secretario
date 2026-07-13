@@ -3,6 +3,9 @@
   "functions": {
     "api/webhook/uazapi.js": {
       "maxDuration": 10
+    },
+    "api/webhook/google.js": {
+      "maxDuration": 10
     }
   }
 }

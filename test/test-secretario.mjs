@@ -83,6 +83,21 @@ ok('nenhuma origem reprova', () => {
   const { message_ids, ...semMsgs } = BASE;
   assert.equal(validateTaskInput(semMsgs)[0], false);
 });
+ok('email_id sozinho passa (task de email)', () => {
+  const { message_ids, ...semMsgs } = BASE;
+  assert.deepEqual(validateTaskInput({ ...semMsgs, email_id: 'deadbeef-0000-0000-0000-000000000003' }), [true, []]);
+});
+ok('email_id + message_ids juntos reprova', () => {
+  assert.equal(validateTaskInput({ ...BASE, email_id: 'deadbeef-0000-0000-0000-000000000003' })[0], false);
+});
+ok('as tres origens juntas reprova', () => {
+  const [valido] = validateTaskInput({
+    ...BASE,
+    meeting_id: 'deadbeef-0000-0000-0000-000000000002',
+    email_id: 'deadbeef-0000-0000-0000-000000000003',
+  });
+  assert.equal(valido, false);
+});
 ok('prazo_previsto SEM offset reprova (fuso da maquina nao pode decidir)', () => {
   const [valido, erros] = validateTaskInput({ ...BASE, prazo_previsto: '2026-07-14T09:00:00' });
   assert.equal(valido, false);

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Cria as tabelas do Hermes Secretário no Supabase SEM o humano tocar em SQL.
-// Roda as 3 migrations via Supabase Management API e verifica que as tabelas
-// existem com RLS ligado. Node 18+, zero dependências. Idempotente: re-rodar
-// é seguro (IF NOT EXISTS em tudo).
+// Roda as migrations do array MIGRATIONS via Supabase Management API e
+// verifica que as tabelas de TABELAS existem com RLS ligado. Node 18+, zero
+// dependências. Idempotente: re-rodar é seguro (IF NOT EXISTS em tudo).
 //
 // Env necessárias:
 //   SUPABASE_URL            https://<ref>.supabase.co
@@ -22,10 +22,11 @@ const MIGRATIONS = [
   '002_tasks.sql',
   '003_triagem_runs.sql',
   '004_fireflies.sql',
+  '005_google.sql',
 ];
 const RAW_BASE =
   'https://raw.githubusercontent.com/jcarlosamorim/hermes-secretario/main/migrations/';
-const TABELAS = ['whatsapp_messages', 'tasks', 'triagem_runs', 'fireflies_meetings'];
+const TABELAS = ['whatsapp_messages', 'tasks', 'triagem_runs', 'fireflies_meetings', 'gmail_messages', 'calendar_events'];
 
 export function extractProjectRef(url) {
   const m = String(url || '').match(/^https:\/\/([a-z0-9]+)\.supabase\.co\/?$/);
@@ -87,7 +88,7 @@ async function main() {
     console.error(`aplicada: ${name}`);
   }
 
-  // Verificação: as 3 tabelas existem E estão com RLS ligado.
+  // Verificação: todas as tabelas de TABELAS existem E estão com RLS ligado.
   const rows = await runQuery(
     ref,
     token,
