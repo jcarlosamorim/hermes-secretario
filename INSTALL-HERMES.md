@@ -31,7 +31,8 @@ depender da própria memória pra não perder pedido, prazo e cobrança.
 
 | Arquivo | Pra quê |
 |---|---|
-| `migrations/001..003*.sql` | conteúdo que o humano cola no SQL Editor (fase 1) |
+| `agente/instalar-banco.mjs` | VOCÊ roda na fase 1: cria as tabelas sozinho |
+| `migrations/001..003*.sql` | o SQL que o instalar-banco executa (não peça pro humano colar) |
 | `webhook/` | projeto que o humano importa na Vercel (fase 2) |
 | `agente/secretario.mjs` | sua ferramenta de operação (fase 4: instale em você) |
 | `agente/AGENTE-TRIAGEM.md` | sua rotina permanente de triagem (fase 4) |
@@ -67,30 +68,60 @@ Diga a ele:
 > seu gerenciador (não vamos usá-la no dia a dia). Região: a mais próxima
 > de você. Aguarde ~2 min provisionar.
 
-### 1.2 Criar as tabelas
+### 1.2 Buscar as credenciais (ele cola, você guarda)
 
-Mande pra ele, UM POR VEZ, o conteúdo de `migrations/001_whatsapp_messages.sql`,
-depois `002_tasks.sql`, depois `003_triagem_runs.sql`, com a instrução:
+O humano NÃO vai colar SQL em lugar nenhum: você mesmo cria as tabelas no
+passo 1.3. Pra isso, peça as 3 credenciais, explicando cada tela:
 
-> No menu lateral: **SQL Editor > New query**. Cole isto e clique em Run.
-> Deve terminar com "Success. No rows returned".
-
-Não resuma nem edite o SQL: cole o arquivo inteiro, comentários incluídos
-(os comentários explicam decisões de segurança pra quem ler depois).
-
-### 1.3 Buscar as credenciais
-
-Diga a ele:
-
-> No menu **Project Settings**:
-> 1. Em **Data API**, copie o **Project URL** (formato
+> Preciso de 3 credenciais. No painel do Supabase:
+> 1. Em **Project Settings > Data API**, copie o **Project URL** (formato
 >    `https://xxxxxxxx.supabase.co`) e me mande.
-> 2. Em **API Keys**, ache a chave **service_role**, clique em
->    **Reveal**, copie e me mande. Atenção: é a service_role, NÃO a anon.
+> 2. Em **Project Settings > API Keys**, ache a chave **service_role**,
+>    clique em **Reveal**, copie e me mande. Atenção: é a service_role,
+>    NÃO a anon.
+> 3. Clique no seu avatar (canto da tela) > **Account Settings** >
+>    **Access Tokens** > **Generate new token**. Nome:
+>    `instalacao-hermes`. Copie o token (começa com `sbp_`) e me mande.
+>    Esse token é TEMPORÁRIO: eu uso pra criar as tabelas e no fim desta
+>    fase você o revoga.
 
-Guarde como `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+Guarde como `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` e
+`SUPABASE_ACCESS_TOKEN`.
 
-### 1.4 Validação da fase (você executa)
+### 1.3 Criar as tabelas (VOCÊ executa)
+
+Baixe `agente/instalar-banco.mjs` deste repo (raw do GitHub) e rode:
+
+```bash
+SUPABASE_URL=... SUPABASE_ACCESS_TOKEN=... node instalar-banco.mjs
+```
+
+O script aplica as 3 migrations via Supabase Management API e verifica que
+as tabelas `whatsapp_messages`, `tasks` e `triagem_runs` existem com RLS
+ligado. Re-rodar é seguro (idempotente). Sucesso = JSON final com
+`"ok": true`.
+
+| Erro | Causa provável |
+|---|---|
+| `401` na Management API | token errado/incompleto ou já revogado (volte ao 1.2 item 3) |
+| `SUPABASE_URL invalida` | URL não é `https://<ref>.supabase.co` (copiou de outra tela?) |
+| `tabelas_sem_rls` não vazio | não deveria acontecer com estas migrations; NÃO avance, revise |
+
+Plano B (só se você não tiver como rodar Node): mande o conteúdo de cada
+migration, um arquivo por vez e sem editar nada, pro humano colar em
+**SQL Editor > New query > Run**.
+
+### 1.4 Revogar o token de instalação
+
+Assim que o 1.3 passar, diga a ele:
+
+> Tabelas criadas. Agora volte em **Account Settings > Access Tokens** e
+> **revogue** o token `instalacao-hermes`. Ele dava acesso à sua conta
+> inteira do Supabase e não é mais necessário.
+
+Descarte sua cópia do `SUPABASE_ACCESS_TOKEN`: nenhuma outra fase o usa.
+
+### 1.5 Validação da fase (você executa)
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
@@ -102,8 +133,8 @@ curl -s -o /dev/null -w "%{http_code}" \
 | Resultado | Significado |
 |---|---|
 | `200` | fase concluída, avance |
-| `404` | migrations não rodaram (volte ao 1.2) |
-| `401` | chave errada (é a anon? copiou incompleta? volte ao 1.3) |
+| `404` | migrations não rodaram (volte ao 1.3) |
+| `401` | chave errada (é a anon? copiou incompleta? volte ao 1.2) |
 | outro | mande o corpo do erro pro humano conferir o projeto |
 
 Repita o mesmo curl pra `whatsapp_messages` e `triagem_runs` (3× 200 = ok).

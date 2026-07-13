@@ -30,10 +30,11 @@ Hermes** e diga:
 > Vamos instalar esse sistema. Leia o arquivo INSTALL-HERMES.md deste
 > repositório e me guie passo a passo.
 
-Ele conduz a instalação em 4 fases, validando cada uma: (1) criar o banco
-no Supabase e colar as credenciais, (2) subir o webhook na Vercel, (3)
-conectar seu WhatsApp na uazapi, (4) instalar a rotina de triagem nele
-mesmo. Você só cria as contas e cola credenciais quando ele pedir.
+Ele conduz a instalação em 4 fases, validando cada uma: (1) você cria o
+projeto no Supabase e cola as credenciais, e ELE cria as tabelas sozinho,
+(2) subir o webhook na Vercel, (3) conectar seu WhatsApp na uazapi, (4)
+instalar a rotina de triagem nele mesmo. Você nunca toca em SQL nem em
+terminal: só cria contas e cola credenciais quando ele pedir.
 
 ## O que você vai precisar ter (ou criar durante a instalação)
 
@@ -47,7 +48,8 @@ mesmo. Você só cria as contas e cola credenciais quando ele pedir.
 
 ```
 INSTALL-HERMES.md         runbook de instalação (escrito PRO seu Hermes)
-migrations/               3 SQLs do banco (rodados na fase 1)
+migrations/               3 SQLs do banco (o Hermes aplica na fase 1)
+agente/instalar-banco.mjs cria as tabelas via Management API (fase 1)
 webhook/                  captura uazapi -> Supabase (deploy na fase 2)
 agente/secretario.mjs     ferramenta que o Hermes usa pra operar (fase 4)
 agente/AGENTE-TRIAGEM.md  rotina permanente de triagem do Hermes (fase 4)

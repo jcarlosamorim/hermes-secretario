@@ -2,6 +2,7 @@
 // Rodar: node test/test-secretario.mjs
 import assert from 'node:assert/strict';
 import { computeSla, validateTaskInput, formatCard, groupByChat, SLA_HORAS } from '../agente/secretario.mjs';
+import { extractProjectRef } from '../agente/instalar-banco.mjs';
 
 let passed = 0;
 function ok(desc, fn) {
@@ -144,6 +145,17 @@ ok('from_me vira "DONO" e midia sem texto ganha marcador', () => {
   const m = conversas[0].mensagens[0];
   assert.equal(m.de, 'DONO');
   assert.equal(m.texto, '[midia sem texto/transcricao]');
+});
+
+// --- extractProjectRef (instalar-banco) ---
+ok('extrai ref de URL valida (com e sem barra final)', () => {
+  assert.equal(extractProjectRef('https://eyeshtedbltwazicqkas.supabase.co'), 'eyeshtedbltwazicqkas');
+  assert.equal(extractProjectRef('https://abc123.supabase.co/'), 'abc123');
+});
+ok('rejeita URL que nao e do formato do projeto', () => {
+  assert.equal(extractProjectRef('https://supabase.com/dashboard/project/abc'), null);
+  assert.equal(extractProjectRef('https://abc123.supabase.co/rest/v1'), null);
+  assert.equal(extractProjectRef(''), null);
 });
 
 console.log(`\n${passed} asserts passando`);
