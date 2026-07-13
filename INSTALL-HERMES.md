@@ -37,7 +37,7 @@ depender da própria memória pra não perder pedido, prazo e cobrança.
 | `agente/AGENTE-TRIAGEM.md` | sua rotina permanente de triagem (fase 4) |
 
 Baixe o que precisar pelo raw do GitHub
-(`https://raw.githubusercontent.com/<owner>/<repo>/main/<caminho>`).
+(`https://raw.githubusercontent.com/jcarlosamorim/hermes-secretario/main/<caminho>`).
 
 ---
 
@@ -127,7 +127,7 @@ chat, não é segredo).
 
 > Acesse https://vercel.com, crie a conta (pode entrar com GitHub).
 > Clique em **Add New > Project** e importe este repositório
-> (`<URL-DO-REPO>`). Antes de clicar em Deploy:
+> (`https://github.com/jcarlosamorim/hermes-secretario`). Antes de clicar em Deploy:
 > 1. **Root Directory**: clique em Edit e selecione a pasta **`webhook`**.
 > 2. Em **Environment Variables**, adicione as 4 que eu vou te passar.
 
