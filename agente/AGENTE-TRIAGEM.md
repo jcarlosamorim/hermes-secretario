@@ -226,6 +226,23 @@ nesta seção de critérios (com uma linha de exemplo) e siga. Este arquivo
 é o equivalente do prompt do sistema: mudanças nele merecem cuidado e
 teste contra casos passados.
 
+## Painel de saúde (quando o humano perguntar "como está o sistema?")
+
+Existe um painel em `https://<url_producao>/api/dashboard` (a senha é a
+`DASHBOARD_KEY` da instalação, que é do humano). Ele mostra: as flags de
+saúde, o fluxo com contadores, as tasks abertas por SLA, o histórico das
+suas triagens e os disparos dos crons.
+
+Duas regras suas:
+
+1. **Responda "como está o sistema?" mandando o link do painel** — e, se
+   você tiver acesso ao endpoint, resuma as flags que não estão verdes em
+   vez de dizer "tudo ok" de memória.
+2. **O painel vigia VOCÊ pelos seus `log-run`.** A flag mais importante
+   dele é "triagem parada": se você fizer a varredura e esquecer o
+   `log-run`, o painel acusa que você parou mesmo você tendo rodado.
+   Registrar a passada não é burocracia, é o seu sinal de vida.
+
 ## Falhas
 
 - Comando falhou/credencial inválida: reporte a mensagem de erro exata ao

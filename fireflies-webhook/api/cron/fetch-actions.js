@@ -7,6 +7,7 @@
 // Por isso MAX_FETCH_PER_RUN = 2 (24 rodadas x 2 = 48/dia no pior caso).
 
 import { getSupabase } from '../../lib/supabase.js';
+import { recordCronRun } from '../../lib/cron-log.js';
 import { fetchTranscriptSummary } from '../../lib/fireflies.js';
 
 const MAX_FETCH_PER_RUN = Number(process.env.MAX_FETCH_PER_RUN || 2);
@@ -29,6 +30,7 @@ export default async function handler(req, res) {
   }
 
   const supabase = getSupabase();
+  const startedAt = new Date();
   const { data: pendentes, error } = await supabase
     .from('fireflies_meetings')
     .select('id, fireflies_meeting_id, fetch_attempts')
@@ -36,7 +38,10 @@ export default async function handler(req, res) {
     .lt('fetch_attempts', MAX_ATTEMPTS)
     .order('received_at', { ascending: true })
     .limit(MAX_FETCH_PER_RUN);
-  if (error) return res.status(500).json({ ok: false, erro: error.message });
+  if (error) {
+    await recordCronRun(supabase, { project: 'fireflies', job: 'fetch-actions', startedAt, status: 'error', error: error.message });
+    return res.status(500).json({ ok: false, erro: error.message });
+  }
 
   const stats = { candidatas: pendentes.length, ok: 0, aguardando: 0, sem_action_items: 0, erro: 0 };
 
@@ -78,5 +83,12 @@ export default async function handler(req, res) {
   }
 
   console.log('[fetch-actions]', JSON.stringify(stats));
+  await recordCronRun(supabase, {
+    project: 'fireflies',
+    job: 'fetch-actions',
+    startedAt,
+    status: stats.candidatas > 0 && stats.erro === stats.candidatas ? 'error' : 'ok',
+    stats,
+  });
   return res.status(200).json({ ok: true, ...stats });
 }

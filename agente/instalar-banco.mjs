@@ -23,10 +23,11 @@ const MIGRATIONS = [
   '003_triagem_runs.sql',
   '004_fireflies.sql',
   '005_google.sql',
+  '006_cron_runs.sql',
 ];
 const RAW_BASE =
   'https://raw.githubusercontent.com/jcarlosamorim/hermes-secretario/main/migrations/';
-const TABELAS = ['whatsapp_messages', 'tasks', 'triagem_runs', 'fireflies_meetings', 'gmail_messages', 'calendar_events'];
+const TABELAS = ['whatsapp_messages', 'tasks', 'triagem_runs', 'fireflies_meetings', 'gmail_messages', 'calendar_events', 'cron_runs'];
 
 export function extractProjectRef(url) {
   const m = String(url || '').match(/^https:\/\/([a-z0-9]+)\.supabase\.co\/?$/);

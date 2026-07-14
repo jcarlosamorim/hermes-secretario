@@ -48,6 +48,13 @@ toca em SQL, terminal ou formulário de deploy: só cria contas e cola
 credenciais quando ele pedir, e revoga os tokens temporários quando ele
 mandar.
 
+Depois de instalado, você acompanha tudo pelo **painel de saúde** em
+`https://<seu-webhook>/api/dashboard` (senha: a `DASHBOARD_KEY` que você
+criou na fase 2). Ele responde "o sistema continua rodando?" em um
+segundo: triagem do agente viva, fila de mensagens, tasks abertas por
+SLA e os crons — inclusive a falha que nenhum log acusa, que é o seu
+agente parar de rodar a rotina em silêncio.
+
 ## O que você vai precisar ter (ou criar durante a instalação)
 
 - Conta **Supabase** (free) — o banco.

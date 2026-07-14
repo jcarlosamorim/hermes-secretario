@@ -32,6 +32,10 @@ export const PROJETOS = {
       'api/webhook/uazapi.js',
       'api/webhook/google.js',
       'api/cron/transcribe.js',
+      'api/dashboard.js',
+      'api/dashboard-data.js',
+      'lib/dashboard-helpers.js',
+      'lib/cron-log.js',
       'lib/extract.js',
       'lib/filter.js',
       'lib/supabase.js',
@@ -40,7 +44,7 @@ export const PROJETOS = {
       'lib/transcribe.js',
       'config/excluded-chats.json',
     ],
-    envs: ['UAZAPI_WEBHOOK_SECRET', 'OWNER_JID', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    envs: ['UAZAPI_WEBHOOK_SECRET', 'OWNER_JID', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'DASHBOARD_KEY'],
     // Setadas só se presentes no ambiente (fase 3C adiciona GOOGLE_SYNC_SECRET;
     // fase 3D adiciona as de transcrição — re-rodando este script).
     envsOpcionais: ['GOOGLE_SYNC_SECRET', 'GROQ_API_KEY', 'UAZAPI_BASE_URL', 'UAZAPI_TOKEN', 'CRON_SECRET'],
@@ -56,6 +60,7 @@ export const PROJETOS = {
       'api/cron/fetch-actions.js',
       'lib/fireflies.js',
       'lib/supabase.js',
+      'lib/cron-log.js',
     ],
     envs: ['FIREFLIES_WEBHOOK_SECRET', 'FIREFLIES_API_KEY', 'CRON_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
     healthPath: '/api/webhook',
@@ -208,8 +213,9 @@ async function main() {
     url_producao: urlProducao,
     aliases,
     health_check: health,
+    painel: alvo === 'webhook' ? `${urlProducao}/api/dashboard` : undefined,
     proximo_passo: alvo === 'webhook'
-      ? 'guarde a url_producao: ela entra no registro do webhook da uazapi (fase 3)'
+      ? 'guarde a url_producao: ela entra no registro do webhook da uazapi (fase 3). O painel de saude esta em /api/dashboard (abre com a DASHBOARD_KEY)'
       : 'guarde a url_producao: ela entra no registro do webhook no painel do Fireflies (fase 3B.3)',
   }, null, 2));
 }

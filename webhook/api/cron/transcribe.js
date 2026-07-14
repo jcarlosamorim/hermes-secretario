@@ -8,6 +8,7 @@
 // faz nada (nunca derruba o resto do projeto).
 
 import { getSupabase } from '../../lib/supabase.js';
+import { recordCronRun } from '../../lib/cron-log.js';
 import { isAudioMessage, transcribeAudioMessage } from '../../lib/transcribe.js';
 
 const MAX_PER_RUN = Number(process.env.MAX_TRANSCRIBE_PER_RUN || 5);
@@ -28,6 +29,7 @@ export default async function handler(req, res) {
   }
 
   const supabase = getSupabase();
+  const startedAt = new Date();
   const { data: candidatas, error } = await supabase
     .from('whatsapp_messages')
     .select('id, uazapi_message_id, raw_payload')
@@ -35,7 +37,10 @@ export default async function handler(req, res) {
     .eq('processed', false)
     .order('received_at', { ascending: true })
     .limit(50);
-  if (error) return res.status(500).json({ ok: false, erro: error.message });
+  if (error) {
+    await recordCronRun(supabase, { project: 'webhook', job: 'transcribe', startedAt, status: 'error', error: error.message });
+    return res.status(500).json({ ok: false, erro: error.message });
+  }
 
   // Só mensagens de áudio (ptt/voice/audio); o resto de text_content null é
   // mídia sem legenda, que não tem o que transcrever.
@@ -64,5 +69,9 @@ export default async function handler(req, res) {
   }
 
   console.log('[transcribe]', JSON.stringify(stats));
+  // Vassoura que só encontrou falhas = disparo com erro (o painel acusa);
+  // rodada limpa ou parcial = ok.
+  const status = stats.audios > 0 && stats.transcritos === 0 && stats.falhas > 0 ? 'error' : 'ok';
+  await recordCronRun(supabase, { project: 'webhook', job: 'transcribe', startedAt, status, stats });
   return res.status(200).json({ ok: true, ...stats });
 }

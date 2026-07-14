@@ -163,6 +163,12 @@ outro meio confiável se não tiver shell). Guarde como
 `UAZAPI_WEBHOOK_SECRET`. Não mostre o valor no chat: você vai usá-lo na
 fase 3 pra montar a URL.
 
+Gere um SEGUNDO segredo hex de 32 caracteres e guarde como
+`DASHBOARD_KEY` — é a senha do **painel de saúde** (`/api/dashboard`),
+onde o humano vê se o sistema continua rodando. Este o humano PRECISA
+conhecer: peça que ele mesmo gere e cole (assim você nunca ecoa segredo
+no chat), e diga pra guardar como guarda uma senha.
+
 Pergunte também o **número de WhatsApp monitorado** com DDI, só dígitos
 (ex.: `5511999998888`). Guarde como `OWNER_JID` (esse pode circular em
 chat, não é segredo).
@@ -217,6 +223,20 @@ curl -s https://<url_producao>/api/webhook/uazapi
 
 Esperado: `hermes-secretario-webhook ok`. Um POST sem secret deve dar 401
 (isso é o certo: fail-closed).
+
+Valide também o painel de saúde:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}' https://<url_producao>/api/dashboard-data
+# esperado: 401 (sem chave = porta fechada)
+curl -s -H "Authorization: Bearer $DASHBOARD_KEY" https://<url_producao>/api/dashboard-data | head -c 80
+# esperado: {"ok":true,...
+```
+
+Diga ao humano pra abrir `https://<url_producao>/api/dashboard` no
+navegador e colar a `DASHBOARD_KEY` (pede uma vez, fica salva no
+navegador). É normal o painel mostrar o aviso "nenhuma triagem registrada
+ainda" — a rotina só entra na fase 4.
 
 **Token:** se NENHUMA fase opcional com deploy (3B Fireflies, 3C Google,
 3D áudio) vai acontecer, diga ao humano pra revogar o `VERCEL_TOKEN`
